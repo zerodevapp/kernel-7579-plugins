@@ -16,3 +16,6 @@
 [submodule "signers/ecdsa/lib/solady"]
 	path = signers/ecdsa/lib/solady
 	url = https://github.com/vectorized/solady
+[submodule "policies/signature-caller/lib/forge-std"]
+	path = policies/signature-caller/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
