@@ -56,6 +56,7 @@ contract ECDSASigner is SignerBase {
 
     function _signerOnUninstall(bytes32 id, bytes calldata) internal override {
         require(signer[id][msg.sender] != address(0));
+        delete signer[id][msg.sender];
         usedIds[msg.sender]--;
     }
 }
