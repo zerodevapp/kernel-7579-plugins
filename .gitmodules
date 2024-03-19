@@ -22,3 +22,6 @@
 [submodule "policies/signature-caller/lib/kernel_v3"]
 	path = policies/signature-caller/lib/kernel_v3
 	url = https://github.com/zerodevapp/kernel_v3
+[submodule "policies/call-policy/lib/forge-std"]
+	path = policies/call-policy/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
