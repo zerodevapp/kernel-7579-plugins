@@ -17,7 +17,6 @@ import {WebAuthn} from "./WebAuthn.sol";
 struct WebAuthnValidatorData {
     uint256 pubKeyX;
     uint256 pubKeyY;
-    bool usePrecompiled;
 }
 
 /**
@@ -114,8 +113,9 @@ contract WebAuthnValidator is IValidator {
             string memory clientDataJSON,
             uint256 responseTypeLocation,
             uint256 r,
-            uint256 s
-        ) = abi.decode(signature, (bytes, string, uint256, uint256, uint256));
+            uint256 s,
+            bool usePrecompiled
+        ) = abi.decode(signature, (bytes, string, uint256, uint256, uint256, bool));
 
         // get the public key from storage
         WebAuthnValidatorData memory webAuthnData = webAuthnValidatorStorage[sender];
@@ -132,7 +132,7 @@ contract WebAuthnValidator is IValidator {
             s,
             webAuthnData.pubKeyX,
             webAuthnData.pubKeyY,
-            webAuthnData.usePrecompiled
+            usePrecompiled
         );
 
         // return the validation data
