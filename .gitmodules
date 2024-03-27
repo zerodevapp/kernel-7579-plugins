@@ -28,3 +28,15 @@
 [submodule "policies/call-policy/lib/kernel_v3"]
 	path = policies/call-policy/lib/kernel_v3
 	url = https://github.com/zerodevapp/kernel_v3
+[submodule "policies/ratelimit/lib/forge-std"]
+	path = policies/ratelimit/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "policies/gas/lib/forge-std"]
+	path = policies/gas/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "policies/gas/lib/kernel_v3"]
+	path = policies/gas/lib/kernel_v3
+	url = https://github.com/zerodevapp/kernel_v3
+[submodule "policies/ratelimit/lib/kernel_v3"]
+	path = policies/ratelimit/lib/kernel_v3
+	url = https://github.com/zerodevapp/kernel_v3
