@@ -37,3 +37,6 @@
 [submodule "policies/gas/lib/kernel_v3"]
 	path = policies/gas/lib/kernel_v3
 	url = https://github.com/zerodevapp/kernel_v3
+[submodule "policies/ratelimit/lib/kernel_v3"]
+	path = policies/ratelimit/lib/kernel_v3
+	url = https://github.com/zerodevapp/kernel_v3
