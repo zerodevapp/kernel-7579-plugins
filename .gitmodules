@@ -31,3 +31,6 @@
 [submodule "policies/ratelimit/lib/forge-std"]
 	path = policies/ratelimit/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
+[submodule "policies/gas/lib/forge-std"]
+	path = policies/gas/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
