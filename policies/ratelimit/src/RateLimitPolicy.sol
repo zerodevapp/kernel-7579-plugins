@@ -15,7 +15,7 @@ struct RateLimitConfig {
     ValidAfter startAt;
 }
 
-contract GasPolicy is PolicyBase {
+contract RateLimitPolicy is PolicyBase {
     mapping(address => uint256) public usedIds;
     mapping(bytes32 id => mapping(address => Status)) public status;
     mapping(bytes32 id => mapping(address kernel => RateLimitConfig)) public rateLimitConfigs;
@@ -36,10 +36,8 @@ contract GasPolicy is PolicyBase {
             return 1;
         }
         rateLimitConfigs[id][msg.sender].count = config.count - 1;
-        rateLimitConfigs[id][msg.sender].startAt =
-            ValidAfter.wrap(ValidAfter.unwrap(config.startAt) + config.interval);
+        rateLimitConfigs[id][msg.sender].startAt = ValidAfter.wrap(ValidAfter.unwrap(config.startAt) + config.interval);
         return packValidationData(config.startAt, ValidUntil.wrap(0));
-
     }
 
     function checkSignaturePolicy(bytes32 id, address sender, bytes32 hash, bytes calldata sig)
