@@ -43,3 +43,6 @@
 [submodule "signers/webauthn/lib/forge-std"]
 	path = signers/webauthn/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
+[submodule "signers/webauthn/lib/kernel_v3"]
+	path = signers/webauthn/lib/kernel_v3
+	url = https://github.com/zerodevapp/kernel_v3
