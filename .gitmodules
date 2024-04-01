@@ -46,3 +46,6 @@
 [submodule "signers/webauthn/lib/kernel_v3"]
 	path = signers/webauthn/lib/kernel_v3
 	url = https://github.com/zerodevapp/kernel_v3
+[submodule "signers/webauthn/lib/openzeppelin-contracts"]
+	path = signers/webauthn/lib/openzeppelin-contracts
+	url = https://github.com/openzeppelin/openzeppelin-contracts
