@@ -49,3 +49,6 @@
 [submodule "signers/webauthn/lib/openzeppelin-contracts"]
 	path = signers/webauthn/lib/openzeppelin-contracts
 	url = https://github.com/openzeppelin/openzeppelin-contracts
+[submodule "policies/sudo/lib/forge-std"]
+	path = policies/sudo/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
