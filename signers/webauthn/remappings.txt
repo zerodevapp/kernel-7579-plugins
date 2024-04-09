@@ -1,0 +1,7 @@
+@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
+ds-test/=lib/kernel_v3/lib/forge-std/lib/ds-test/src/
+erc4626-tests/=lib/openzeppelin-contracts/lib/erc4626-tests/
+forge-std/=lib/forge-std/src/
+kernel/=lib/kernel_v3/src/
+openzeppelin-contracts/=lib/openzeppelin-contracts/
+solady/=lib/kernel_v3/lib/solady/src/
