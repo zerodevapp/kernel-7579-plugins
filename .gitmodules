@@ -40,3 +40,9 @@
 [submodule "policies/ratelimit/lib/kernel_v3"]
 	path = policies/ratelimit/lib/kernel_v3
 	url = https://github.com/zerodevapp/kernel_v3
+[submodule "policies/sudo/lib/forge-std"]
+	path = policies/sudo/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "policies/sudo/lib/kernel_v3"]
+	path = policies/sudo/lib/kernel_v3
+	url = https://github.com/zerodevapp/kernel_v3
