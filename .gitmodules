@@ -61,6 +61,11 @@
 [submodule "policies/sudo/lib/kernel_v3"]
 	path = policies/sudo/lib/kernel_v3
 	url = https://github.com/zerodevapp/kernel_v3
+[submodule "actions/recovery/lib/forge-std"]
+	path = actions/recovery/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "actions/recovery/lib/kernel_v3"]
+	path = actions/recovery/lib/kernel_v3
 [submodule "hooks/onlyEntrypoint/lib/forge-std"]
 	path = hooks/onlyEntrypoint/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
