@@ -85,7 +85,8 @@ contract CallPolicy is PolicyBase {
     }
 
     function _checkPermission(address wallet, bytes32 id, CallType callType, address target, bytes calldata data, uint256 value) internal returns(bool){
-        bytes32 permissionHash = keccak256(abi.encodePacked(callType, target, bytes4(data[0:4])));
+        bytes4 _data = data.length == 0 ? bytes4(0x0) : bytes4(data[0:4]);
+        bytes32 permissionHash = keccak256(abi.encodePacked(callType, target, _data));
         (uint256 allowedValue, ParamRule[] memory rules) = abi.decode(encodedPermissions[id][permissionHash][wallet], (uint256, ParamRule[]));
         if(value > allowedValue) {
             revert CallViolatesValueRule();
