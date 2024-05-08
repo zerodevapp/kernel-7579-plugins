@@ -84,7 +84,7 @@ contract WebAuthnSigner is SignerBase {
         ) = abi.decode(signature, (bytes, string, uint256, uint256, uint256, bool));
 
         // get the public key from storage
-        WebAuthnSignerData memory webAuthnData = webAuthnSignerStorage[id][sender];
+        WebAuthnSignerData memory webAuthnData = webAuthnSignerStorage[id][msg.sender];
 
         // verify the signature using the signature and the public key
         bool isValid = WebAuthn.verifySignature(

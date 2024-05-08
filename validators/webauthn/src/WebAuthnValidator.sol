@@ -100,7 +100,7 @@ contract WebAuthnValidator is IValidator {
         view
         returns (bytes4)
     {
-        return _verifySignature(sender, hash, data) == VALIDATION_SUCCESS ? ERC1271_MAGICVALUE : ERC1271_INVALID;
+        return _verifySignature(msg.sender, hash, data) == VALIDATION_SUCCESS ? ERC1271_MAGICVALUE : ERC1271_INVALID;
     }
 
     /**
