@@ -72,3 +72,12 @@
 [submodule "hooks/onlyEntrypoint/lib/kernel_v3"]
 	path = hooks/onlyEntrypoint/lib/kernel_v3
 	url = https://github.com/zerodevapp/kernel_v3
+[submodule "validators/multisig_k1_r1/lib/forge-std"]
+	path = validators/multisig_k1_r1/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "validators/multisig_k1_r1/lib/kernel"]
+	path = validators/multisig_k1_r1/lib/kernel
+	url = https://github.com/zerodevapp/kernel
+[submodule "validators/multisig_k1_r1/lib/solady"]
+	path = validators/multisig_k1_r1/lib/solady
+	url = https://github.com/vectorized/solady
