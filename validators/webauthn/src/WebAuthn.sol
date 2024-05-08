@@ -5,8 +5,6 @@ pragma solidity ^0.8.0;
 import "./Base64URL.sol";
 import "./P256.sol";
 
-import "forge-std/console.sol";
-
 /**
  * Helper library for external contracts to verify WebAuthn signatures.
  *
@@ -160,8 +158,6 @@ library WebAuthn {
         }
 
         bool verified = P256.verifySignature(messageHash, r, s, x, y, usePrecompiled);
-        console.log("Verified : ", verified);
-        console.log("DeferredResult : ", deferredResult);
 
         if (verified && deferredResult) {
             return true;
