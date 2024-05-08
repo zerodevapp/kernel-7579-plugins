@@ -107,7 +107,7 @@ contract WebAuthnValidator is IValidator {
     /**
      * @notice Verify a signature.
      */
-    function _verifySignature(address sender, bytes32 hash, bytes calldata signature) private view returns (uint256) {
+    function _verifySignature(address account, bytes32 hash, bytes calldata signature) private view returns (uint256) {
         // decode the signature
         (
             bytes memory authenticatorData,
@@ -119,7 +119,7 @@ contract WebAuthnValidator is IValidator {
         ) = abi.decode(signature, (bytes, string, uint256, uint256, uint256, bool));
 
         // get the public key from storage
-        WebAuthnValidatorData memory webAuthnData = webAuthnValidatorStorage[sender];
+        WebAuthnValidatorData memory webAuthnData = webAuthnValidatorStorage[account];
 
         // verify the signature using the signature and the public key
         bool isValid = WebAuthn.verifySignature(
