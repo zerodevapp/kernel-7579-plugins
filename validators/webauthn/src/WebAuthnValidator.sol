@@ -2,16 +2,15 @@
 
 pragma solidity ^0.8.0;
 
-import {
-    IValidator,
-    IHook 
-} from "kernel/interfaces/IERC7579Modules.sol";
-import {
-    MODULE_TYPE_VALIDATOR,
-    MODULE_TYPE_HOOK
-} from "kernel/types/Constants.sol";
+import {IValidator, IHook} from "kernel/interfaces/IERC7579Modules.sol";
+import {MODULE_TYPE_VALIDATOR, MODULE_TYPE_HOOK} from "kernel/types/Constants.sol";
 import {PackedUserOperation} from "kernel/interfaces/PackedUserOperation.sol";
-import {SIG_VALIDATION_FAILED, ERC1271_MAGICVALUE, ERC1271_INVALID} from "kernel/types/Constants.sol";
+import {
+    SIG_VALIDATION_FAILED_UINT,
+    SIG_VALIDATION_SUCCESS_UINT,
+    ERC1271_MAGICVALUE,
+    ERC1271_INVALID
+} from "kernel/types/Constants.sol";
 import {WebAuthn} from "./WebAuthn.sol";
 
 struct WebAuthnValidatorData {
@@ -100,7 +99,9 @@ contract WebAuthnValidator is IValidator {
         view
         returns (bytes4)
     {
-        return _verifySignature(msg.sender, hash, data) == 0 ? ERC1271_MAGICVALUE : ERC1271_INVALID;
+        return _verifySignature(msg.sender, hash, data) == SIG_VALIDATION_SUCCESS_UINT
+            ? ERC1271_MAGICVALUE
+            : ERC1271_INVALID;
     }
 
     /**
@@ -137,9 +138,9 @@ contract WebAuthnValidator is IValidator {
 
         // return the validation data
         if (isValid) {
-            return 0;
+            return SIG_VALIDATION_SUCCESS_UINT;
         }
 
-        return 1;
+        return SIG_VALIDATION_FAILED_UINT;
     }
 }
