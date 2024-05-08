@@ -7,9 +7,6 @@
 [submodule "validators/webauthn/lib/openzeppelin-contracts"]
 	path = validators/webauthn/lib/openzeppelin-contracts
 	url = https://github.com/openzeppelin/openzeppelin-contracts
-[submodule "validators/webauthn/lib/kernel_v3"]
-	path = validators/webauthn/lib/kernel_v3
-	url = https://github.com/zerodevapp/kernel_v3
 [submodule "signers/ecdsa/lib/kernel_v3"]
 	path = signers/ecdsa/lib/kernel_v3
 	url = https://github.com/zerodevapp/kernel_v3
