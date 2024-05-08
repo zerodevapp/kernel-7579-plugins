@@ -7,9 +7,6 @@
 [submodule "validators/webauthn/lib/openzeppelin-contracts"]
 	path = validators/webauthn/lib/openzeppelin-contracts
 	url = https://github.com/openzeppelin/openzeppelin-contracts
-[submodule "validators/webauthn/lib/kernel_v3"]
-	path = validators/webauthn/lib/kernel_v3
-	url = https://github.com/zerodevapp/kernel_v3
 [submodule "signers/ecdsa/lib/kernel_v3"]
 	path = signers/ecdsa/lib/kernel_v3
 	url = https://github.com/zerodevapp/kernel_v3
@@ -81,3 +78,12 @@
 [submodule "validators/multisig_k1_r1/lib/solady"]
 	path = validators/multisig_k1_r1/lib/solady
 	url = https://github.com/vectorized/solady
+[submodule "validators/webauthn/lib/kernel"]
+	path = validators/webauthn/lib/kernel
+	url = https://github.com/zerodevapp/kernel
+[submodule "validators/webauthn/lib/p256-verifier"]
+	path = validators/webauthn/lib/p256-verifier
+	url = https://github.com/daimo-eth/p256-verifier
+[submodule "validators/webauthn/lib/FreshCryptoLib"]
+	path = validators/webauthn/lib/FreshCryptoLib
+	url = https://github.com/rdubois-crypto/FreshCryptoLib
