@@ -7,9 +7,6 @@
 [submodule "validators/webauthn/lib/openzeppelin-contracts"]
 	path = validators/webauthn/lib/openzeppelin-contracts
 	url = https://github.com/openzeppelin/openzeppelin-contracts
-[submodule "validators/webauthn/lib/kernel_v3"]
-	path = validators/webauthn/lib/kernel_v3
-	url = https://github.com/zerodevapp/kernel_v3
 [submodule "signers/ecdsa/lib/kernel_v3"]
 	path = signers/ecdsa/lib/kernel_v3
 	url = https://github.com/zerodevapp/kernel_v3
@@ -49,9 +46,6 @@
 [submodule "signers/webauthn/lib/forge-std"]
 	path = signers/webauthn/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
-[submodule "signers/webauthn/lib/kernel_v3"]
-	path = signers/webauthn/lib/kernel_v3
-	url = https://github.com/zerodevapp/kernel_v3
 [submodule "signers/webauthn/lib/openzeppelin-contracts"]
 	path = signers/webauthn/lib/openzeppelin-contracts
 	url = https://github.com/openzeppelin/openzeppelin-contracts
@@ -72,3 +66,6 @@
 [submodule "hooks/onlyEntrypoint/lib/kernel_v3"]
 	path = hooks/onlyEntrypoint/lib/kernel_v3
 	url = https://github.com/zerodevapp/kernel_v3
+[submodule "signers/webauthn/lib/kernel"]
+	path = signers/webauthn/lib/kernel
+	url = https://github.com/zerodevapp/kernel

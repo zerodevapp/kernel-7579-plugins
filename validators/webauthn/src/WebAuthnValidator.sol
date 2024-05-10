@@ -2,16 +2,15 @@
 
 pragma solidity ^0.8.0;
 
-import {
-    IValidator,
-    IHook,
-    VALIDATION_SUCCESS,
-    VALIDATION_FAILED,
-    MODULE_TYPE_VALIDATOR,
-    MODULE_TYPE_HOOK
-} from "kernel/interfaces/IERC7579Modules.sol";
+import {IValidator, IHook} from "kernel/interfaces/IERC7579Modules.sol";
+import {MODULE_TYPE_VALIDATOR, MODULE_TYPE_HOOK} from "kernel/types/Constants.sol";
 import {PackedUserOperation} from "kernel/interfaces/PackedUserOperation.sol";
-import {SIG_VALIDATION_FAILED, ERC1271_MAGICVALUE, ERC1271_INVALID} from "kernel/types/Constants.sol";
+import {
+    SIG_VALIDATION_FAILED_UINT,
+    SIG_VALIDATION_SUCCESS_UINT,
+    ERC1271_MAGICVALUE,
+    ERC1271_INVALID
+} from "kernel/types/Constants.sol";
 import {WebAuthn} from "./WebAuthn.sol";
 
 struct WebAuthnValidatorData {
@@ -89,7 +88,7 @@ contract WebAuthnValidator is IValidator {
         override
         returns (uint256)
     {
-        return _verifySignature(_userOp.sender, _userOpHash, _userOp.signature);
+        return _verifySignature(msg.sender, _userOpHash, _userOp.signature);
     }
 
     /**
@@ -100,13 +99,15 @@ contract WebAuthnValidator is IValidator {
         view
         returns (bytes4)
     {
-        return _verifySignature(sender, hash, data) == VALIDATION_SUCCESS ? ERC1271_MAGICVALUE : ERC1271_INVALID;
+        return _verifySignature(msg.sender, hash, data) == SIG_VALIDATION_SUCCESS_UINT
+            ? ERC1271_MAGICVALUE
+            : ERC1271_INVALID;
     }
 
     /**
      * @notice Verify a signature.
      */
-    function _verifySignature(address sender, bytes32 hash, bytes calldata signature) private view returns (uint256) {
+    function _verifySignature(address account, bytes32 hash, bytes calldata signature) private view returns (uint256) {
         // decode the signature
         (
             bytes memory authenticatorData,
@@ -118,7 +119,7 @@ contract WebAuthnValidator is IValidator {
         ) = abi.decode(signature, (bytes, string, uint256, uint256, uint256, bool));
 
         // get the public key from storage
-        WebAuthnValidatorData memory webAuthnData = webAuthnValidatorStorage[sender];
+        WebAuthnValidatorData memory webAuthnData = webAuthnValidatorStorage[account];
 
         // verify the signature using the signature and the public key
         bool isValid = WebAuthn.verifySignature(
@@ -137,9 +138,9 @@ contract WebAuthnValidator is IValidator {
 
         // return the validation data
         if (isValid) {
-            return VALIDATION_SUCCESS;
+            return SIG_VALIDATION_SUCCESS_UINT;
         }
 
-        return VALIDATION_FAILED;
+        return SIG_VALIDATION_FAILED_UINT;
     }
 }

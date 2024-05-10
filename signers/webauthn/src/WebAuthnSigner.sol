@@ -3,7 +3,7 @@
 pragma solidity ^0.8.0;
 
 import "kernel/sdk/moduleBase/SignerBase.sol";
-import {VALIDATION_SUCCESS, VALIDATION_FAILED} from "kernel/interfaces/IERC7579Modules.sol";
+import {SIG_VALIDATION_SUCCESS_UINT, SIG_VALIDATION_FAILED_UINT} from "kernel/types/Constants.sol";
 import {PackedUserOperation} from "kernel/interfaces/PackedUserOperation.sol";
 import {ERC1271_MAGICVALUE, ERC1271_INVALID} from "kernel/types/Constants.sol";
 import {WebAuthn} from "./WebAuthn.sol";
@@ -50,25 +50,27 @@ contract WebAuthnSigner is SignerBase {
         override
         returns (uint256)
     {
-        return _verifySignature(id, userOp.sender, userOpHash, userOp.signature);
+        return _verifySignature(id, msg.sender, userOpHash, userOp.signature);
     }
 
     /**
      * @notice Verify a signature with sender for ERC-1271 validation.
      */
-    function checkSignature(bytes32 id, address sender, bytes32 hash, bytes calldata sig)
+    function checkSignature(bytes32 id, address, bytes32 hash, bytes calldata sig)
         external
         view
         override
         returns (bytes4)
     {
-        return _verifySignature(id, sender, hash, sig) == VALIDATION_SUCCESS ? ERC1271_MAGICVALUE : ERC1271_INVALID;
+        return _verifySignature(id, msg.sender, hash, sig) == SIG_VALIDATION_SUCCESS_UINT
+            ? ERC1271_MAGICVALUE
+            : ERC1271_INVALID;
     }
 
     /**
      * @notice Verify a signature.
      */
-    function _verifySignature(bytes32 id, address sender, bytes32 hash, bytes calldata signature)
+    function _verifySignature(bytes32 id, address account, bytes32 hash, bytes calldata signature)
         private
         view
         returns (uint256)
@@ -84,7 +86,7 @@ contract WebAuthnSigner is SignerBase {
         ) = abi.decode(signature, (bytes, string, uint256, uint256, uint256, bool));
 
         // get the public key from storage
-        WebAuthnSignerData memory webAuthnData = webAuthnSignerStorage[id][sender];
+        WebAuthnSignerData memory webAuthnData = webAuthnSignerStorage[id][account];
 
         // verify the signature using the signature and the public key
         bool isValid = WebAuthn.verifySignature(
@@ -103,10 +105,10 @@ contract WebAuthnSigner is SignerBase {
 
         // return the validation data
         if (isValid) {
-            return VALIDATION_SUCCESS;
+            return SIG_VALIDATION_SUCCESS_UINT;
         }
 
-        return VALIDATION_FAILED;
+        return SIG_VALIDATION_FAILED_UINT;
     }
     /**
      * @notice Install WebAuthn signer for a kernel account.
