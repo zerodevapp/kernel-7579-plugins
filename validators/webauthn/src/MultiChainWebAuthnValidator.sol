@@ -20,7 +20,9 @@ struct WebAuthnValidatorData {
     uint256 pubKeyY;
 }
 
-contract MultiChainValidator is IValidator {
+bytes constant DUMMY_WEBAUTHN_SIG = hex"00000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000001635bc6d0f68ff895cae8a288ecf7542a6a9cd555df784b73e1e2ea7e9104b1db15e9015d280cb19527881c625fee43fd3a405d5b0d199a8c8e6589a7381209e40000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002549960de5880e8c687434170f6476605b8fe4aeb9a28632c7995cf3ba831d97631d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000867b2274797065223a22776562617574686e2e676574222c226368616c6c656e6765223a22746278584e465339585f3442797231634d77714b724947422d5f3330613051685a36793775634d30424f45222c226f726967696e223a22687474703a2f2f6c6f63616c686f73743a33303030222c2263726f73734f726967696e223a66616c73657d0000000000000000000000000000000000000000000000000000";
+
+contract MultiChainWebAuthnValidator is IValidator {
     // The location of the challenge in the clientDataJSON
     uint256 constant CHALLENGE_LOCATION = 23;
 
@@ -79,9 +81,14 @@ contract MultiChainValidator is IValidator {
             return _verifySignature(msg.sender, userOpHash, signature);
         }
         bytes32 merkleRoot = bytes32(merkleData[0:32]);
-        bytes32[] memory proof = abi.decode(merkleData[32:], (bytes32[]));
-        require(MerkleProofLib.verify(proof, merkleRoot, userOpHash), "hash is not in proof");
-        // simple ecdsa verification
+        if (keccak256(signature) == keccak256(DUMMY_WEBAUTHN_SIG)) {
+            (bytes32 dummyUserOpHash, bytes32[] memory proof) = abi.decode(merkleData[32:], (bytes32, bytes32[]));
+            require(MerkleProofLib.verify(proof, merkleRoot, dummyUserOpHash), "hash is not in proof");
+        } else {
+            bytes32[] memory proof = abi.decode(merkleData[32:], (bytes32[]));
+            require(MerkleProofLib.verify(proof, merkleRoot, userOpHash), "hash is not in proof");
+        }
+        // simple webauthn verification
         bytes32 ethRoot = ECDSA.toEthSignedMessageHash(merkleRoot);
         return _verifySignature(msg.sender, ethRoot, signature);
     }
@@ -97,7 +104,6 @@ contract MultiChainValidator is IValidator {
             return _verifySignature(msg.sender, hash, signature) == SIG_VALIDATION_SUCCESS_UINT
             ? ERC1271_MAGICVALUE
             : ERC1271_INVALID;
-
         }
         bytes32 merkleRoot = bytes32(merkleData[0:32]);
         bytes32[] memory proof = abi.decode(merkleData[32:], (bytes32[]));
