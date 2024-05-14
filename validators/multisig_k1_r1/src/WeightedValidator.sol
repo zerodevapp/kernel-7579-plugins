@@ -14,6 +14,7 @@ import {
     MODULE_TYPE_VALIDATOR,
     MODULE_TYPE_HOOK
 } from "kernel/src/types/Constants.sol";
+import {WebAuthn} from "./WebAuthn.sol";
 
 struct WeightedValidatorStorage {
     uint24 totalWeight;
@@ -51,6 +52,8 @@ struct VoteStorage {
 }
 
 contract WeightedValidator is EIP712, IValidator {
+    // The location of the challenge in the clientDataJSON
+    uint256 constant CHALLENGE_LOCATION = 23;
     mapping(address kernel => WeightedValidatorStorage) public weightedStorage;
     mapping(uint256 guardianIndex => mapping(address kernel => GuardianStorage)) public guardian;
     mapping(bytes32 callDataAndNonceHash => mapping(address kernel => ProposalStorage)) public proposalStatus;
@@ -138,7 +141,33 @@ contract WeightedValidator is EIP712, IValidator {
         return ECDSA.recover(hash, sig) == signer;
     }
 
-    function _checkR1Sig(bytes32 hash, bytes calldata sig, uint256 x, uint256 y) internal view returns (bool) {}
+    function _checkR1Sig(bytes32 hash, bytes calldata sig, uint256 x, uint256 y) internal view returns (bool) {
+        // decode the signature
+        (
+            bytes memory authenticatorData,
+            string memory clientDataJSON,
+            uint256 responseTypeLocation,
+            uint256 r,
+            uint256 s,
+            bool usePrecompiled
+        ) = abi.decode(sig, (bytes, string, uint256, uint256, uint256, bool));
+
+        // verify the signature using the signature and the public key
+        bool isValid = WebAuthn.verifySignature(
+            abi.encodePacked(hash),
+            authenticatorData,
+            true,
+            clientDataJSON,
+            CHALLENGE_LOCATION,
+            responseTypeLocation,
+            r,
+            s,
+            x,
+            y,
+            usePrecompiled
+        );
+        return isValid;
+    }
 
     function isModuleType(uint256 moduleTypeId) external pure returns (bool) {
         return moduleTypeId == MODULE_TYPE_VALIDATOR;

@@ -87,3 +87,6 @@
 [submodule "validators/webauthn/lib/FreshCryptoLib"]
 	path = validators/webauthn/lib/FreshCryptoLib
 	url = https://github.com/rdubois-crypto/FreshCryptoLib
+[submodule "validators/multisig_k1_r1/lib/openzeppelin-contracts"]
+	path = validators/multisig_k1_r1/lib/openzeppelin-contracts
+	url = https://github.com/openzeppelin/openzeppelin-contracts
