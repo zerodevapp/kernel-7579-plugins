@@ -2,18 +2,18 @@
 
 pragma solidity ^0.8.0;
 
-import "kernel/src/types/Types.sol";
+import "kernel/types/Types.sol";
 import {ECDSA} from "solady/utils/ECDSA.sol";
 import {EIP712} from "solady/utils/EIP712.sol";
-import {PackedUserOperation} from "kernel/src/interfaces/PackedUserOperation.sol";
-import {IValidator} from "kernel/src/interfaces/IERC7579Modules.sol";
+import {PackedUserOperation} from "kernel/interfaces/PackedUserOperation.sol";
+import {IValidator} from "kernel/interfaces/IERC7579Modules.sol";
 import {
     ERC1271_MAGICVALUE,
     ERC1271_INVALID,
     SIG_VALIDATION_FAILED_UINT,
     MODULE_TYPE_VALIDATOR,
     MODULE_TYPE_HOOK
-} from "kernel/src/types/Constants.sol";
+} from "kernel/types/Constants.sol";
 import {WebAuthn} from "./WebAuthn.sol";
 
 struct WeightedValidatorStorage {
@@ -127,8 +127,8 @@ contract WeightedValidator is EIP712, IValidator {
 
     function _parseCalldataArrayBytes(bytes calldata _data) internal pure returns (bytes[] calldata guardianData) {
         assembly {
-            guardianData.offset := add(_data.offset, 0x20)
-            guardianData.length := calldataload(_data.offset)
+            guardianData.offset := add(add(_data.offset, 0x20), calldataload(_data.offset))
+            guardianData.length := calldataload(sub(guardianData.offset, 0x20))
         }
     }
 
@@ -246,7 +246,9 @@ contract WeightedValidator is EIP712, IValidator {
             (uint256 x, uint256 y) = abi.decode(strg.encodedPublicKey, (uint256, uint256));
             sigCheck = _checkR1Sig(hash, sig[1:], x, y);
         }
-        currentApproval += strg.weight;
+        if (sigCheck) {
+            currentApproval += strg.weight;
+        }
         return (sigCheck, currentApproval);
     }
 

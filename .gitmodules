@@ -90,3 +90,6 @@
 [submodule "validators/multisig_k1_r1/lib/openzeppelin-contracts"]
 	path = validators/multisig_k1_r1/lib/openzeppelin-contracts
 	url = https://github.com/openzeppelin/openzeppelin-contracts
+[submodule "validators/multisig_k1_r1/lib/FreshCryptoLib"]
+	path = validators/multisig_k1_r1/lib/FreshCryptoLib
+	url = https://github.com/rdubois-crypto/FreshCryptoLib
