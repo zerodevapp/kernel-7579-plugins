@@ -69,3 +69,12 @@
 [submodule "signers/webauthn/lib/kernel"]
 	path = signers/webauthn/lib/kernel
 	url = https://github.com/zerodevapp/kernel
+[submodule "hooks/spendlingLimits/lib/forge-std"]
+	path = hooks/spendlingLimits/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "hooks/spendlingLimits/lib/kernel"]
+	path = hooks/spendlingLimits/lib/kernel
+	url = https://github.com/zerodevapp/kernel
+[submodule "hooks/spendlingLimits/lib/solady"]
+	path = hooks/spendlingLimits/lib/solady
+	url = https://github.com/vectorized/solady
