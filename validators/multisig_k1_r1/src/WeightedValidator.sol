@@ -138,7 +138,11 @@ contract WeightedValidator is EIP712, IValidator {
     }
 
     function _checkK1Sig(bytes32 hash, bytes calldata sig, address signer) internal view returns (bool) {
-        return ECDSA.recover(hash, sig) == signer;
+        if (ECDSA.recover(hash, sig) == signer) {
+            return true;
+        }
+        bytes32 ethHash = ECDSA.toEthSignedMessageHash(hash);
+        return ECDSA.recover(ethHash, sig) == signer; 
     }
 
     function _checkR1Sig(bytes32 hash, bytes calldata sig, uint256 x, uint256 y) internal view returns (bool) {
