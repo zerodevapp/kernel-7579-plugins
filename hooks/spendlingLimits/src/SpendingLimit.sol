@@ -41,7 +41,7 @@ contract SpendingLimit is IHook {
     }
 
     function isInitialized(address smartAccount) external view override returns (bool) {
-        return listLength[smartAccount] == 0;
+        return listLength[smartAccount] != 0;
     }
 
     function preCheck(address, uint256, bytes calldata) external payable override returns (bytes memory) {
