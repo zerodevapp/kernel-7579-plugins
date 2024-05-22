@@ -58,7 +58,7 @@ contract SpendingLimit is IHook {
         return abi.encode(balances);
     }
 
-    function postCheck(bytes calldata context) external payable override {
+    function postCheck(bytes calldata context, bool, bytes calldata) external payable override {
         uint256 length = listLength[msg.sender];
         uint256[] memory preBalance = abi.decode(context, (uint256[]));
         for (uint256 i = 0; i < length; i++) {
