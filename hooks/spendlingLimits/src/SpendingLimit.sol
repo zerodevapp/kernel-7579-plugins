@@ -69,6 +69,10 @@ contract SpendingLimit is IHook {
             } else {
                 balance = ERC20(data.token).balanceOf(msg.sender);
             }
+            // if balance increased, skip the allowance check
+            if (balance > preBalance[i]) {
+                return;
+            }
             uint256 used = preBalance[i] - balance;
             if (data.allowance < used) {
                 revert ExceedsAllowance();
@@ -79,8 +83,8 @@ contract SpendingLimit is IHook {
 
     function _parseCalldataArrayBytes(bytes calldata _data) internal pure returns (bytes[] calldata arr) {
         assembly {
-            arr.offset := add(_data.offset, 0x20)
-            arr.length := calldataload(_data.offset)
+            arr.offset := add(add(_data.offset, 0x20), calldataload(_data.offset))
+            arr.length := calldataload(sub(arr.offset, 0x20))
         }
     }
 }
