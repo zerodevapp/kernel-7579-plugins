@@ -78,7 +78,7 @@ contract WeightedValidator is EIP712, IValidator {
     error InvalidSignature(uint256 i);
 
     function _domainNameAndVersion() internal pure override returns (string memory, string memory) {
-        return ("WeightedValidator", "0.0.1");
+        return ("MultiChainWeightedValidator", "0.0.1");
     }
 
     function _addGuardians(bytes[] calldata guardianData, address _kernel) internal {
