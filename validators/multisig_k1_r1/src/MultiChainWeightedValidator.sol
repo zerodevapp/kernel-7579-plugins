@@ -52,7 +52,7 @@ struct VoteStorage {
     VoteStatus status;
 }
 
-contract WeightedValidator is EIP712, IValidator {
+contract MultiChainWeightedValidator is EIP712, IValidator {
     // The location of the challenge in the clientDataJSON
     uint256 constant CHALLENGE_LOCATION = 23;
     mapping(address kernel => WeightedValidatorStorage) public weightedStorage;
