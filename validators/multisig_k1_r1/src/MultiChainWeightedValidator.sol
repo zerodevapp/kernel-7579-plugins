@@ -17,7 +17,7 @@ import {
 } from "kernel/types/Constants.sol";
 import {WebAuthn} from "./WebAuthn.sol";
 
-struct WeightedValidatorStorage {
+struct MultiChainWeightedValidatorStorage {
     uint24 totalWeight;
     uint24 threshold;
     uint48 delay;
@@ -55,7 +55,7 @@ struct VoteStorage {
 contract MultiChainWeightedValidator is EIP712, IValidator {
     // The location of the challenge in the clientDataJSON
     uint256 constant CHALLENGE_LOCATION = 23;
-    mapping(address kernel => WeightedValidatorStorage) public weightedStorage;
+    mapping(address kernel => MultiChainWeightedValidatorStorage) public multiChainWeightedStorage;
     mapping(uint256 guardianIndex => mapping(address kernel => GuardianStorage)) public guardian;
     mapping(bytes32 callDataAndNonceHash => mapping(address kernel => ProposalStorage)) public proposalStatus;
     mapping(bytes32 callDataAndNonceHash => mapping(uint256 guardianIndex => mapping(address kernel => VoteStorage)))
@@ -82,7 +82,7 @@ contract MultiChainWeightedValidator is EIP712, IValidator {
     }
 
     function _addGuardians(bytes[] calldata guardianData, address _kernel) internal {
-        uint24 totalWeight = weightedStorage[_kernel].totalWeight;
+        uint24 totalWeight = multiChainWeightedStorage[_kernel].totalWeight;
         for (uint256 i = 0; i < guardianData.length; i++) {
             bytes calldata g = guardianData[i];
             bytes1 guardianType = bytes1(g[0]);
@@ -112,7 +112,7 @@ contract MultiChainWeightedValidator is EIP712, IValidator {
                 revert NotSupportedSignatureType();
             }
         }
-        weightedStorage[_kernel].totalWeight = totalWeight;
+        multiChainWeightedStorage[_kernel].totalWeight = totalWeight;
     }
 
     function onInstall(bytes calldata _data) external payable override {
@@ -120,10 +120,10 @@ contract MultiChainWeightedValidator is EIP712, IValidator {
         uint48 delay = uint48(bytes6(_data[3:9]));
         bytes[] calldata guardianData = _parseCalldataArrayBytes(_data[9:]);
         _addGuardians(guardianData, msg.sender);
-        require(threshold <= weightedStorage[msg.sender].totalWeight, "Threshold too high");
-        weightedStorage[msg.sender].delay = delay;
-        weightedStorage[msg.sender].threshold = threshold;
-        weightedStorage[msg.sender].guardianLength = uint32(guardianData.length);
+        require(threshold <= multiChainWeightedStorage[msg.sender].totalWeight, "Threshold too high");
+        multiChainWeightedStorage[msg.sender].delay = delay;
+        multiChainWeightedStorage[msg.sender].threshold = threshold;
+        multiChainWeightedStorage[msg.sender].guardianLength = uint32(guardianData.length);
     }
 
     function _parseCalldataArrayBytes(bytes calldata _data) internal pure returns (bytes[] calldata guardianData) {
@@ -136,7 +136,7 @@ contract MultiChainWeightedValidator is EIP712, IValidator {
     function _parseSig(bytes calldata rawSig)
         internal
         pure
-        returns (bytes[] calldata merkleData, bytes[] calldata signatures)
+        returns (bytes calldata merkleData, bytes[] calldata signatures)
     {
         assembly {
             merkleData.offset := add(add(rawSig.offset, 32), calldataload(rawSig.offset))
@@ -196,7 +196,7 @@ contract MultiChainWeightedValidator is EIP712, IValidator {
     }
 
     function _isInitialized(address smartAccount) internal view returns (bool) {
-        return weightedStorage[smartAccount].totalWeight != 0;
+        return multiChainWeightedStorage[smartAccount].totalWeight != 0;
     }
 
     function validateUserOp(PackedUserOperation calldata userOp, bytes32 userOpHash)
@@ -205,10 +205,9 @@ contract MultiChainWeightedValidator is EIP712, IValidator {
         override
         returns (uint256)
     {
-        WeightedValidatorStorage storage validatorStrg = weightedStorage[msg.sender];
-        (bytes[] calldata merkleData, bytes[] calldata signatures) = _parseSig(userOp.signature);
-        bytes calldata approveMerkleData = merkleData[0];
-        bytes calldata userOpMerkleData = merkleData[1];
+        MultiChainWeightedValidatorStorage storage validatorStrg = multiChainWeightedStorage[msg.sender];
+        (bytes calldata approveMerkleData, bytes[] calldata signatures) = _parseSig(userOp.signature);
+
         bytes32 callDataAndNonceHash = keccak256(abi.encode(userOp.sender, userOp.callData, userOp.nonce));
         bytes32 hashTypedData = _hashTypedData(
             keccak256(abi.encode(keccak256("Approve(bytes32 callDataAndNonceHash)"), callDataAndNonceHash))
@@ -237,16 +236,9 @@ contract MultiChainWeightedValidator is EIP712, IValidator {
         // userOp Verification
         {
             // last signature to check the userOpHash
-            bytes32 userOpSigHash = userOpHash;
-            if (userOpMerkleData.length != 0) {
-                bytes32 userOpMerkleRoot = bytes32(userOpMerkleData[0:32]);
-                bytes32[] memory userOpProof = abi.decode(userOpMerkleData[32:], (bytes32[]));
-                require(MerkleProofLib.verify(userOpProof, userOpMerkleRoot, userOpHash), "userOp hash is not in proof");
-                userOpSigHash = userOpMerkleRoot;
-            }
             bool sigCheck;
             (sigCheck, currentApproval) =
-                _checkSigVote(callDataAndNonceHash, userOpSigHash, signatures[i], currentApproval);
+                _checkSigVote(callDataAndNonceHash, userOpHash, signatures[i], currentApproval);
             proposalStatus[callDataAndNonceHash][msg.sender].approvals = currentApproval;
             return sigCheck && (currentApproval >= validatorStrg.threshold) ? 0 : 1;
         }
@@ -294,11 +286,11 @@ contract MultiChainWeightedValidator is EIP712, IValidator {
         view
         returns (bytes4)
     {
-        (bytes[] calldata merkleData, bytes[] calldata signatures) = _parseSig(signature);
+        (bytes calldata merkleData, bytes[] calldata signatures) = _parseSig(signature);
         bytes32 sigHash = hash;
-        if (merkleData[0].length != 0) {
-            bytes32 merkleRoot = bytes32(merkleData[0][0:32]);
-            bytes32[] memory proof = abi.decode(merkleData[0][32:], (bytes32[]));
+        if (merkleData.length != 0) {
+            bytes32 merkleRoot = bytes32(merkleData[0:32]);
+            bytes32[] memory proof = abi.decode(merkleData[32:], (bytes32[]));
             require(MerkleProofLib.verify(proof, merkleRoot, hash), "sig hash is not in proof");
             sigHash = merkleRoot;
         }
@@ -307,6 +299,6 @@ contract MultiChainWeightedValidator is EIP712, IValidator {
         for (uint256 i = 0; i < signatures.length; i++) {
             (sigCheck, currentApproval) = _checkSig(sigHash, signatures[i], currentApproval);
         }
-        return currentApproval >= weightedStorage[msg.sender].threshold ? ERC1271_MAGICVALUE : ERC1271_INVALID;
+        return currentApproval >= multiChainWeightedStorage[msg.sender].threshold ? ERC1271_MAGICVALUE : ERC1271_INVALID;
     }
 }
