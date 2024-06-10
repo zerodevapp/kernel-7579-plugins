@@ -71,7 +71,7 @@ contract SpendingLimit is IHook {
             }
             // if balance increased, skip the allowance check
             if (balance > preBalance[i]) {
-                return;
+                continue;
             }
             uint256 used = preBalance[i] - balance;
             if (data.allowance < used) {
