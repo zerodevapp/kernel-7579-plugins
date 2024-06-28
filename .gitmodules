@@ -9,7 +9,8 @@
 	url = https://github.com/openzeppelin/openzeppelin-contracts
 [submodule "signers/ecdsa/lib/kernel_v3"]
 	path = signers/ecdsa/lib/kernel_v3
-	url = https://github.com/zerodevapp/kernel_v3
+	url = https://github.com/zerodevapp/kernel
+	branch = release/v3.1
 [submodule "signers/ecdsa/lib/solady"]
 	path = signers/ecdsa/lib/solady
 	url = https://github.com/vectorized/solady
@@ -18,13 +19,15 @@
 	url = https://github.com/foundry-rs/forge-std
 [submodule "policies/signature-caller/lib/kernel_v3"]
 	path = policies/signature-caller/lib/kernel_v3
-	url = https://github.com/zerodevapp/kernel_v3
+	url = https://github.com/zerodevapp/kernel
+branch = release/v3.1
 [submodule "policies/call-policy/lib/forge-std"]
 	path = policies/call-policy/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
 [submodule "policies/call-policy/lib/kernel_v3"]
 	path = policies/call-policy/lib/kernel_v3
-	url = https://github.com/zerodevapp/kernel_v3
+	url = https://github.com/zerodevapp/kernel
+branch = release/v3.1
 [submodule "policies/ratelimit/lib/forge-std"]
 	path = policies/ratelimit/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
@@ -33,16 +36,19 @@
 	url = https://github.com/foundry-rs/forge-std
 [submodule "policies/gas/lib/kernel_v3"]
 	path = policies/gas/lib/kernel_v3
-	url = https://github.com/zerodevapp/kernel_v3
+	url = https://github.com/zerodevapp/kernel
+branch = release/v3.1
 [submodule "policies/ratelimit/lib/kernel_v3"]
 	path = policies/ratelimit/lib/kernel_v3
-	url = https://github.com/zerodevapp/kernel_v3
+	url = https://github.com/zerodevapp/kernel
+branch = release/v3.1
 [submodule "policies/timestamp/lib/forge-std"]
 	path = policies/timestamp/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
 [submodule "policies/timestamp/lib/kernel_v3"]
 	path = policies/timestamp/lib/kernel_v3
-	url = https://github.com/zerodevapp/kernel_v3
+	url = https://github.com/zerodevapp/kernel
+branch = release/v3.1
 [submodule "signers/webauthn/lib/forge-std"]
 	path = signers/webauthn/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
@@ -54,27 +60,33 @@
 	url = https://github.com/foundry-rs/forge-std
 [submodule "policies/sudo/lib/kernel_v3"]
 	path = policies/sudo/lib/kernel_v3
-	url = https://github.com/zerodevapp/kernel_v3
+	url = https://github.com/zerodevapp/kernel
+branch = release/v3.1
 [submodule "actions/recovery/lib/forge-std"]
 	path = actions/recovery/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
 [submodule "actions/recovery/lib/kernel_v3"]
 	path = actions/recovery/lib/kernel_v3
+	url = https://github.com/zerodevapp/kernel
+branch = release/v3.1
 [submodule "hooks/onlyEntrypoint/lib/forge-std"]
 	path = hooks/onlyEntrypoint/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
 [submodule "hooks/onlyEntrypoint/lib/kernel_v3"]
 	path = hooks/onlyEntrypoint/lib/kernel_v3
-	url = https://github.com/zerodevapp/kernel_v3
+	url = https://github.com/zerodevapp/kernel
+	branch = release/v3.1
 [submodule "signers/webauthn/lib/kernel"]
 	path = signers/webauthn/lib/kernel
 	url = https://github.com/zerodevapp/kernel
+	branch = release/v3.1
 [submodule "hooks/spendlingLimits/lib/forge-std"]
 	path = hooks/spendlingLimits/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
 [submodule "hooks/spendlingLimits/lib/kernel"]
 	path = hooks/spendlingLimits/lib/kernel
 	url = https://github.com/zerodevapp/kernel
+	branch = release/v3.1
 [submodule "hooks/spendlingLimits/lib/solady"]
 	path = hooks/spendlingLimits/lib/solady
 	url = https://github.com/vectorized/solady
