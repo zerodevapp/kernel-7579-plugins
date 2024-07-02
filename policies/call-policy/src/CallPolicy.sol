@@ -15,7 +15,7 @@ struct Permission {
 struct ParamRule {
     ParamCondition condition;
     uint64 offset;
-    bytes32 param;
+    bytes32[] params;
 }
 
 enum ParamCondition {
@@ -24,7 +24,8 @@ enum ParamCondition {
     LESS_THAN,
     GREATER_THAN_OR_EQUAL,
     LESS_THAN_OR_EQUAL,
-    NOT_EQUAL
+    NOT_EQUAL,
+    ONE_OF
 }
 
 enum Status {
@@ -37,6 +38,7 @@ contract CallPolicy is PolicyBase {
     error InvalidCallType();
     error CallViolatesParamRule();
     error CallViolatesValueRule();
+
     mapping(address => uint256) public usedIds;
     mapping(bytes32 id => mapping(address => Status)) public status;
     mapping(bytes32 id => mapping(bytes32 permissionHash => mapping(address => bytes))) public encodedPermissions;
@@ -56,27 +58,29 @@ contract CallPolicy is PolicyBase {
         (CallType callType, ExecType execType,,) = ExecLib.decode(mode);
         bytes calldata executionCallData = userOp.callData; // Cache calldata here
         assembly {
-            executionCallData.offset := add(add(executionCallData.offset, 0x24), calldataload(add(executionCallData.offset, 0x24)))
+            executionCallData.offset :=
+                add(add(executionCallData.offset, 0x24), calldataload(add(executionCallData.offset, 0x24)))
             executionCallData.length := calldataload(sub(executionCallData.offset, 0x20))
         }
-        if(callType == CALLTYPE_SINGLE) {
+        if (callType == CALLTYPE_SINGLE) {
             (address target, uint256 value, bytes calldata callData) = ExecLib.decodeSingle(executionCallData);
             bool permissionPass = _checkPermission(msg.sender, id, CALLTYPE_SINGLE, target, callData, value);
-            if(!permissionPass) {
+            if (!permissionPass) {
                 revert CallViolatesParamRule();
             }
-        } else if(callType == CALLTYPE_BATCH) {
+        } else if (callType == CALLTYPE_BATCH) {
             Execution[] calldata exec = ExecLib.decodeBatch(executionCallData);
-            for(uint256 i = 0; i < exec.length; i++) {
-                bool permissionPass = _checkPermission(msg.sender, id, CALLTYPE_SINGLE, exec[i].target, exec[i].callData, exec[i].value);
-                if(!permissionPass) {
+            for (uint256 i = 0; i < exec.length; i++) {
+                bool permissionPass =
+                    _checkPermission(msg.sender, id, CALLTYPE_SINGLE, exec[i].target, exec[i].callData, exec[i].value);
+                if (!permissionPass) {
                     revert CallViolatesParamRule();
                 }
             }
-        } else if(callType == CALLTYPE_DELEGATECALL) {
+        } else if (callType == CALLTYPE_DELEGATECALL) {
             (address target, uint256 value, bytes calldata callData) = ExecLib.decodeSingle(executionCallData);
             bool permissionPass = _checkPermission(msg.sender, id, CALLTYPE_DELEGATECALL, target, callData, value);
-            if(!permissionPass) {
+            if (!permissionPass) {
                 revert CallViolatesParamRule();
             }
         } else {
@@ -84,28 +88,48 @@ contract CallPolicy is PolicyBase {
         }
     }
 
-    function _checkPermission(address wallet, bytes32 id, CallType callType, address target, bytes calldata data, uint256 value) internal returns(bool){
+    function _checkPermission(
+        address wallet,
+        bytes32 id,
+        CallType callType,
+        address target,
+        bytes calldata data,
+        uint256 value
+    ) internal returns (bool) {
         bytes4 _data = data.length == 0 ? bytes4(0x0) : bytes4(data[0:4]);
         bytes32 permissionHash = keccak256(abi.encodePacked(callType, target, _data));
-        (uint256 allowedValue, ParamRule[] memory rules) = abi.decode(encodedPermissions[id][permissionHash][wallet], (uint256, ParamRule[]));
-        if(value > allowedValue) {
+        (uint256 allowedValue, ParamRule[] memory rules) =
+            abi.decode(encodedPermissions[id][permissionHash][wallet], (uint256, ParamRule[]));
+        if (value > allowedValue) {
             revert CallViolatesValueRule();
         }
         for (uint256 i = 0; i < rules.length; i++) {
             ParamRule memory rule = rules[i];
             bytes32 param = bytes32(data[4 + rule.offset:4 + rule.offset + 32]);
-            if (rule.condition == ParamCondition.EQUAL && param != rule.param) {
+            // only ONE_OF condition can have multiple params
+            if (rule.condition == ParamCondition.EQUAL && param != rule.params[0]) {
                 return false;
-            } else if (rule.condition == ParamCondition.GREATER_THAN && param <= rule.param) {
+            } else if (rule.condition == ParamCondition.GREATER_THAN && param <= rule.params[0]) {
                 return false;
-            } else if (rule.condition == ParamCondition.LESS_THAN && param >= rule.param) {
+            } else if (rule.condition == ParamCondition.LESS_THAN && param >= rule.params[0]) {
                 return false;
-            } else if (rule.condition == ParamCondition.GREATER_THAN_OR_EQUAL && param < rule.param) {
+            } else if (rule.condition == ParamCondition.GREATER_THAN_OR_EQUAL && param < rule.params[0]) {
                 return false;
-            } else if (rule.condition == ParamCondition.LESS_THAN_OR_EQUAL && param > rule.param) {
+            } else if (rule.condition == ParamCondition.LESS_THAN_OR_EQUAL && param > rule.params[0]) {
                 return false;
-            } else if (rule.condition == ParamCondition.NOT_EQUAL && param == rule.param) {
+            } else if (rule.condition == ParamCondition.NOT_EQUAL && param == rule.params[0]) {
                 return false;
+            } else if (rule.condition == ParamCondition.ONE_OF) {
+                bool oneOfStatus = false;
+                for (uint256 j = 0; j < rule.params.length; j++) {
+                    if (param == rule.params[j]) {
+                        oneOfStatus = true;
+                        break;
+                    }
+                }
+                if (!oneOfStatus) {
+                    return false;
+                }
             }
         }
         return true;
@@ -121,21 +145,31 @@ contract CallPolicy is PolicyBase {
         return 0;
     }
 
-    function _parsePermission(bytes calldata _sig) internal pure returns(Permission[] calldata permissions) {
+    function _parsePermission(bytes calldata _sig) internal pure returns (Permission[] calldata permissions) {
         assembly {
-            permissions.offset := add(add(_sig.offset,32), calldataload(_sig.offset))
+            permissions.offset := add(add(_sig.offset, 32), calldataload(_sig.offset))
             permissions.length := calldataload(sub(permissions.offset, 32))
         }
     }
 
-
     function _policyOninstall(bytes32 id, bytes calldata _data) internal override {
         require(status[id][msg.sender] == Status.NA);
         Permission[] calldata permissions = _parsePermission(_data);
-        for(uint256 i = 0; i<permissions.length; i++) {
-            bytes32 permissionHash = keccak256(abi.encodePacked(permissions[i].callType, permissions[i].target, permissions[i].selector));
+        for (uint256 i = 0; i < permissions.length; i++) {
+            // check if the permissionHash is unique
+            bytes32 permissionHash =
+                keccak256(abi.encodePacked(permissions[i].callType, permissions[i].target, permissions[i].selector));
             require(encodedPermissions[id][permissionHash][msg.sender].length == 0, "duplicate permissionHash");
-            encodedPermissions[id][permissionHash][msg.sender] = abi.encode(permissions[i].valueLimit, permissions[i].rules);
+
+            // check if the params length is correct
+            for (uint256 j = 0; j < permissions[i].rules.length; j++) {
+                if (permissions[i].rules[j].condition != ParamCondition.ONE_OF) {
+                    require(permissions[i].rules[j].params.length == 1, "only OneOf condition can have multiple params");
+                }
+            }
+
+            encodedPermissions[id][permissionHash][msg.sender] =
+                abi.encode(permissions[i].valueLimit, permissions[i].rules);
         }
         status[id][msg.sender] = Status.Live;
         usedIds[msg.sender]++;
