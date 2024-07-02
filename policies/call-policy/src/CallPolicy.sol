@@ -98,8 +98,14 @@ contract CallPolicy is PolicyBase {
     ) internal returns (bool) {
         bytes4 _data = data.length == 0 ? bytes4(0x0) : bytes4(data[0:4]);
         bytes32 permissionHash = keccak256(abi.encodePacked(callType, target, _data));
-        (uint256 allowedValue, ParamRule[] memory rules) =
-            abi.decode(encodedPermissions[id][permissionHash][wallet], (uint256, ParamRule[]));
+        bytes memory encodedPermission = encodedPermissions[id][permissionHash][wallet];
+
+        if (encodedPermission.length == 0) {
+            bytes32 permissionHashWithZeroAddress = keccak256(abi.encodePacked(callType, address(0), _data));
+            encodedPermission = encodedPermissions[id][permissionHashWithZeroAddress][wallet];
+        }
+        (uint256 allowedValue, ParamRule[] memory rules) = abi.decode(encodedPermission, (uint256, ParamRule[]));
+
         if (value > allowedValue) {
             revert CallViolatesValueRule();
         }
