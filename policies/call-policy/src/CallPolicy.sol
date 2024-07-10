@@ -36,6 +36,7 @@ enum Status {
 
 contract CallPolicy is PolicyBase {
     error InvalidCallType();
+    error InvalidCallData();
     error CallViolatesParamRule();
     error CallViolatesValueRule();
 
@@ -100,10 +101,18 @@ contract CallPolicy is PolicyBase {
         bytes32 permissionHash = keccak256(abi.encodePacked(callType, target, _data));
         bytes memory encodedPermission = encodedPermissions[id][permissionHash][wallet];
 
+        // try to find the permission with zero address which means ANY target address
+        // e.g. allow to call `approve` function of `ANY` ERC20 token contracts
         if (encodedPermission.length == 0) {
             bytes32 permissionHashWithZeroAddress = keccak256(abi.encodePacked(callType, address(0), _data));
             encodedPermission = encodedPermissions[id][permissionHashWithZeroAddress][wallet];
         }
+
+        // if still no permission found, then the call is not allowed
+        if (encodedPermission.length == 0) {
+            revert InvalidCallData();
+        }
+
         (uint256 allowedValue, ParamRule[] memory rules) = abi.decode(encodedPermission, (uint256, ParamRule[]));
 
         if (value > allowedValue) {
