@@ -115,7 +115,40 @@ contract MultiChainWeightedValidator is EIP712, IValidator {
         multiChainWeightedStorage[_kernel].totalWeight = totalWeight;
     }
 
+    function _removeGuardians(address _kernel) internal {
+        for (uint256 i = 0; i < multiChainWeightedStorage[_kernel].guardianLength; i++) {
+            GuardianStorage memory g = guardian[i][_kernel];
+            delete guardian[i][_kernel];
+            if (g.guardianType == 0x01) {
+                emit GuardianRemovedK1(_kernel, i, address(bytes20(g.encodedPublicKey)));
+            } else if (g.guardianType == 0x02) {
+                bytes32 authenticatorIdHash;
+                bytes memory encodedPublicKey = g.encodedPublicKey;
+                assembly {
+                    authenticatorIdHash := mload(add(add(encodedPublicKey, 0x20), 68))
+                }
+                emit GuardianRemovedR1(_kernel, i, authenticatorIdHash);
+            }
+        }
+    }
+
     function onInstall(bytes calldata _data) external payable override {
+        uint24 threshold = uint24(bytes3(_data[0:3]));
+        uint48 delay = uint48(bytes6(_data[3:9]));
+        bytes[] calldata guardianData = _parseCalldataArrayBytes(_data[9:]);
+        _addGuardians(guardianData, msg.sender);
+        require(threshold <= multiChainWeightedStorage[msg.sender].totalWeight, "Threshold too high");
+        multiChainWeightedStorage[msg.sender].delay = delay;
+        multiChainWeightedStorage[msg.sender].threshold = threshold;
+        multiChainWeightedStorage[msg.sender].guardianLength = uint32(guardianData.length);
+    }
+
+    function renew(bytes calldata _data) external {
+        if (!_isInitialized(msg.sender)) revert NotInitialized(msg.sender);
+        // remove current guardians and storage
+        _removeGuardians(msg.sender);
+        delete multiChainWeightedStorage[msg.sender];
+        // add new guardians and storage
         uint24 threshold = uint24(bytes3(_data[0:3]));
         uint48 delay = uint48(bytes6(_data[3:9]));
         bytes[] calldata guardianData = _parseCalldataArrayBytes(_data[9:]);
@@ -148,7 +181,8 @@ contract MultiChainWeightedValidator is EIP712, IValidator {
 
     function onUninstall(bytes calldata) external payable override {
         if (!_isInitialized(msg.sender)) revert NotInitialized(msg.sender);
-        // TODO remove everything
+        _removeGuardians(msg.sender);
+        delete multiChainWeightedStorage[msg.sender];
     }
 
     function _checkK1Sig(bytes32 hash, bytes calldata sig, address signer) internal view returns (bool) {
@@ -212,7 +246,7 @@ contract MultiChainWeightedValidator is EIP712, IValidator {
         bytes32 hashTypedData = _hashTypedData(
             keccak256(abi.encode(keccak256("Approve(bytes32 callDataAndNonceHash)"), callDataAndNonceHash))
         );
-        bytes32 approveSigHash = hashTypedData;
+        bytes32 approveSigHash = hashTypedData; // TODO: why do we need this?
         if (approveMerkleData.length != 0) {
             bytes32 approveMerkleRoot = bytes32(approveMerkleData[0:32]);
             bytes32[] memory approveProof = abi.decode(approveMerkleData[32:], (bytes32[]));
