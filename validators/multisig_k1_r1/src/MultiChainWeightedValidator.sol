@@ -246,7 +246,7 @@ contract MultiChainWeightedValidator is EIP712, IValidator {
         bytes32 hashTypedData = _hashTypedData(
             keccak256(abi.encode(keccak256("Approve(bytes32 callDataAndNonceHash)"), callDataAndNonceHash))
         );
-        bytes32 approveSigHash = hashTypedData; // TODO: why do we need this?
+        bytes32 approveSigHash = hashTypedData;
         if (approveMerkleData.length != 0) {
             bytes32 approveMerkleRoot = bytes32(approveMerkleData[0:32]);
             bytes32[] memory approveProof = abi.decode(approveMerkleData[32:], (bytes32[]));
