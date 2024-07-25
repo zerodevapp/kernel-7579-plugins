@@ -79,8 +79,9 @@ contract CallPolicy is PolicyBase {
                 }
             }
         } else if (callType == CALLTYPE_DELEGATECALL) {
-            (address target, uint256 value, bytes calldata callData) = ExecLib.decodeSingle(executionCallData);
-            bool permissionPass = _checkPermission(msg.sender, id, CALLTYPE_DELEGATECALL, target, callData, value);
+            address target = address(bytes20(executionCallData[0:20]));
+            bytes calldata callData = executionCallData[20:];
+            bool permissionPass = _checkPermission(msg.sender, id, CALLTYPE_DELEGATECALL, target, callData, 0);
             if (!permissionPass) {
                 revert CallViolatesParamRule();
             }
