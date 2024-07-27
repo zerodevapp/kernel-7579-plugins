@@ -42,10 +42,37 @@ contract CallPolicy is PolicyBase {
 
     mapping(address => uint256) public usedIds;
     mapping(bytes32 id => mapping(address => Status)) public status;
-    mapping(bytes32 id => mapping(bytes32 permissionHash => mapping(address => bytes))) public encodedPermissions;
+    //mapping(bytes32 id => mapping(bytes32 permissionHash => mapping(address => bytes))) public encodedPermissions;
 
     function isInitialized(address wallet) external view override returns (bool) {
         return usedIds[wallet] > 0;
+    }
+
+    function setPermission(bytes32 _id, bytes32 _permissionHash, address _owner, bytes memory _permission) internal {
+        bytes32 slot = keccak256(bytes.concat(bytes32(uint256(uint160(_owner))), keccak256(bytes.concat(_id,_permissionHash))));
+
+        uint256 length = _permission.length;
+        assembly {
+            // store length on first slot, as usual
+            sstore(slot, length)
+            for { let cursor := 0x20 } lt(cursor, add(length, 0x20)) { cursor := add(cursor, 0x20) } {
+                sstore(add(slot, div(cursor, 0x20)), mload(add(_permission, cursor))) // slot + cursor/32
+            }
+        }
+    }
+
+    function encodedPermissions(bytes32 _id, bytes32 _permissionHash, address _owner) public view returns(bytes memory encoded) {
+        bytes32 slot = keccak256(bytes.concat(bytes32(uint256(uint160(_owner))), keccak256(bytes.concat(_id,_permissionHash))));
+        uint256 length;
+        assembly {
+            encoded := mload(0x40)
+            length := sload(slot)
+            mstore(encoded, length)
+            for { let cursor := 0x20 } lt(cursor, add(length, 0x20)) { cursor := add(cursor, 0x20) } {
+                mstore(add(encoded, cursor), sload(add(slot, div(cursor, 0x20))))
+            }
+            mstore(0x40, add(encoded, add(length, 0x20)))
+        }
     }
 
     function checkUserOpPolicy(bytes32 id, PackedUserOperation calldata userOp)
@@ -100,13 +127,13 @@ contract CallPolicy is PolicyBase {
     ) internal returns (bool) {
         bytes4 _data = data.length == 0 ? bytes4(0x0) : bytes4(data[0:4]);
         bytes32 permissionHash = keccak256(abi.encodePacked(callType, target, _data));
-        bytes memory encodedPermission = encodedPermissions[id][permissionHash][wallet];
+        bytes memory encodedPermission = encodedPermissions(id, permissionHash, wallet);
 
         // try to find the permission with zero address which means ANY target address
         // e.g. allow to call `approve` function of `ANY` ERC20 token contracts
         if (encodedPermission.length == 0) {
             bytes32 permissionHashWithZeroAddress = keccak256(abi.encodePacked(callType, address(0), _data));
-            encodedPermission = encodedPermissions[id][permissionHashWithZeroAddress][wallet];
+            encodedPermission = encodedPermissions(id,permissionHashWithZeroAddress,wallet);
         }
 
         // if still no permission found, then the call is not allowed
@@ -175,7 +202,7 @@ contract CallPolicy is PolicyBase {
             // check if the permissionHash is unique
             bytes32 permissionHash =
                 keccak256(abi.encodePacked(permissions[i].callType, permissions[i].target, permissions[i].selector));
-            require(encodedPermissions[id][permissionHash][msg.sender].length == 0, "duplicate permissionHash");
+            require(encodedPermissions(id, permissionHash, msg.sender).length == 0, "duplicate permissionHash");
 
             // check if the params length is correct
             for (uint256 j = 0; j < permissions[i].rules.length; j++) {
@@ -184,8 +211,10 @@ contract CallPolicy is PolicyBase {
                 }
             }
 
-            encodedPermissions[id][permissionHash][msg.sender] =
-                abi.encode(permissions[i].valueLimit, permissions[i].rules);
+            setPermission(
+                id,permissionHash,msg.sender,
+                abi.encode(permissions[i].valueLimit, permissions[i].rules)
+            );
         }
         status[id][msg.sender] = Status.Live;
         usedIds[msg.sender]++;
