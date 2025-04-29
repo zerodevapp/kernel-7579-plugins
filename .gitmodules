@@ -90,3 +90,9 @@ branch = release/v3.1
 [submodule "hooks/spendlingLimits/lib/solady"]
 	path = hooks/spendlingLimits/lib/solady
 	url = https://github.com/vectorized/solady
+[submodule "hooks/caller/lib/forge-std"]
+	path = hooks/caller/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "hooks/caller/lib/kernel"]
+	path = hooks/caller/lib/kernel
+	url = https://github.com/zerodevapp/kernel
