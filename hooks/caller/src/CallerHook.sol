@@ -6,12 +6,14 @@ import {MODULE_TYPE_HOOK} from "kernel/src/types/Constants.sol";
 contract CallerHook is IHook {
     mapping(address => bool) public installed;
     mapping(address caller => mapping(address account => bool allowed)) public allowed;
+    event CallerRegistered(address _user, address _caller);
 
     function onInstall(bytes calldata data) external payable {
         installed[msg.sender] = true;
         address[] memory accounts = abi.decode(data, (address[]));
         for (uint256 i = 0; i < accounts.length; i++) {
             allowed[accounts[i]][msg.sender] = true;
+            emit CallerRegistered(msg.sender, accounts[i]);
         }
     }
 

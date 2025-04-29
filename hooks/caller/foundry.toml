@@ -7,7 +7,7 @@ cbor_metadata = false
 via-ir = true
 optimizer = true
 optimizer_runs = 200
-evm_version = "prague"
+evm_version = "london"
 
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
