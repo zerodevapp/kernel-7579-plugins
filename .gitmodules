@@ -96,3 +96,6 @@ branch = release/v3.1
 [submodule "hooks/caller/lib/kernel"]
 	path = hooks/caller/lib/kernel
 	url = https://github.com/zerodevapp/kernel
+[submodule "validators/erc1271/lib/forge-std"]
+	path = validators/erc1271/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
