@@ -99,3 +99,9 @@ branch = release/v3.1
 [submodule "validators/erc1271/lib/forge-std"]
 	path = validators/erc1271/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
+[submodule "validators/erc1271/lib/kernel"]
+	path = validators/erc1271/lib/kernel
+	url = https://github.com/zerodevapp/kernel
+[submodule "validators/erc1271/lib/safe-smart-account"]
+	path = validators/erc1271/lib/safe-smart-account
+	url = https://github.com/safe-global/safe-smart-account
