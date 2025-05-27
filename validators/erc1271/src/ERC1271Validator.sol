@@ -18,6 +18,7 @@ contract ERC1271Validator is IValidator {
     mapping(address account => address verifier) public verifier;
 
     function onInstall(bytes calldata _data) external payable override {
+        require(_data.length == 20, "invalid input data");
         verifier[msg.sender] = address(bytes20(_data[0:20]));
     }
 
