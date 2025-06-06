@@ -16,8 +16,8 @@ interface IERC1271 {
     function isValidSignature(bytes32 hash, bytes calldata sig) external view returns (bytes4);
 }
 
-// keccak256("UserOperationHash(bytes32 hash)");
-bytes32 constant USER_OPERATION_TYPE_HASH = 0x825c21ede75c452a8bd761f354da3f5fbebf3aa0aff1f57e89074a93e0d502ed;
+// keccak256("MessageHash(bytes32 hash)")
+bytes32 constant MESSAGE_TYPE_HASH = 0xddbb42c14c926ce2b204d00ecc48d770e111c85fe954c1bbbb4a7f6f4b2fbbb9;
 
 contract ERC1271Validator is IValidator, EIP712 {
     mapping(address account => address verifier) public verifier;
@@ -66,27 +66,19 @@ contract ERC1271Validator is IValidator, EIP712 {
             : ERC1271_INVALID;
     }
 
-    function _toUserOpTypedDataHash(bytes32 hash) internal view returns (bytes32) {
-        bytes32 structHash = keccak256(abi.encode(USER_OPERATION_TYPE_HASH, hash));
-        return _hashTypedData(structHash);
-    }
-
     function _verifySignature(address account, bytes32 hash, bytes calldata signature) private view returns (uint256) {
         address _verifier = verifier[account];
 
-        try IERC1271(_verifier).isValidSignature(hash, signature) returns (bytes4 result) {
-            if (result == ERC1271_MAGICVALUE) {
-                return SIG_VALIDATION_SUCCESS_UINT;
-            }
-        } catch {}
-
-        bytes32 wrappedHash = _toUserOpTypedDataHash(hash);
+        bytes32 wrappedHash = _toMessageTypedDataHash(hash);
         try IERC1271(_verifier).isValidSignature(wrappedHash, signature) returns (bytes4 result) {
-            if (result == ERC1271_MAGICVALUE) {
-                return SIG_VALIDATION_SUCCESS_UINT;
-            }
-        } catch {}
+            return result == ERC1271_MAGICVALUE ? SIG_VALIDATION_SUCCESS_UINT : SIG_VALIDATION_FAILED_UINT;
+        } catch {
+            return SIG_VALIDATION_FAILED_UINT;
+        }
+    }
 
-        return SIG_VALIDATION_FAILED_UINT;
+    function _toMessageTypedDataHash(bytes32 hash) internal view returns (bytes32) {
+        bytes32 structHash = keccak256(abi.encode(MESSAGE_TYPE_HASH, hash));
+        return _hashTypedData(structHash);
     }
 }
