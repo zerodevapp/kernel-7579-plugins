@@ -29,8 +29,9 @@ contract CallerHookTest is Test {
     function test_install() public {
         callerHook.onInstall(abi.encode(accounts));
         assertTrue(callerHook.installed(address(this)));
-        assertTrue(callerHook.allowed(account1, address(this)));
-        assertTrue(callerHook.allowed(account2, address(this)));
+        for(uint256 i = 0; i < accounts.length; i++ ) {
+            assertEq(callerHook.allowedAccounts(address(this), i), accounts[i]);
+        }
     }
 
     function test_hook() public {
