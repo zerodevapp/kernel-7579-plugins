@@ -8,7 +8,9 @@ import {IEntryPoint} from "kernel/src/interfaces/IEntryPoint.sol";
 import {MockValidator} from "./mock/MockValidator.sol";
 import {ValidatorLib, ValidationId} from "kernel/src/utils/ValidationTypeLib.sol";
 import {KernelFactory} from "kernel/src/factory/KernelFactory.sol";
+
 address constant ENTRYPOINT_0_7_ADDR = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
+
 contract CallerHookTest is Test {
     CallerHook public callerHook;
     address public account1 = makeAddr("account1");
@@ -18,6 +20,7 @@ contract CallerHookTest is Test {
     MockValidator public mockValidator;
     ValidationId rootValidation;
     bytes[] public initConfig;
+
     function setUp() public {
         callerHook = new CallerHook();
         mockAction = new MockAction();
@@ -29,7 +32,7 @@ contract CallerHookTest is Test {
     function test_install() public {
         callerHook.onInstall(abi.encode(accounts));
         assertTrue(callerHook.installed(address(this)));
-        for(uint256 i = 0; i < accounts.length; i++ ) {
+        for (uint256 i = 0; i < accounts.length; i++) {
             assertEq(callerHook.allowedAccounts(address(this), i), accounts[i]);
         }
     }
@@ -38,25 +41,24 @@ contract CallerHookTest is Test {
         address template = address(new Kernel(IEntryPoint(ENTRYPOINT_0_7_ADDR)));
         KernelFactory factory = new KernelFactory(address(template));
         Kernel kernel = Kernel(payable(factory.createAccount(initData(), bytes32(0))));
-        address(kernel).call(abi.encodeWithSelector(Kernel.installModule.selector, 3, address(mockAction), abi.encodePacked(
-                MockAction.doSomething.selector,
-                address(callerHook),
-                abi.encode(hex"ff", abi.encodePacked(bytes1(0xff), abi.encode(accounts)))
+        address(kernel).call(
+            abi.encodeWithSelector(
+                Kernel.installModule.selector,
+                3,
+                address(mockAction),
+                abi.encodePacked(
+                    MockAction.doSomething.selector,
+                    address(callerHook),
+                    abi.encode(hex"ff", abi.encodePacked(bytes1(0xff), abi.encode(accounts)))
+                )
             )
-        ));
+        );
 
         vm.prank(account1);
         MockAction(address(kernel)).doSomething();
     }
 
     function initData() internal view returns (bytes memory) {
-        return abi.encodeWithSelector(
-            Kernel.initialize.selector,
-            rootValidation,
-            address(0),
-            hex"",
-            hex"",
-            initConfig
-        );
+        return abi.encodeWithSelector(Kernel.initialize.selector, rootValidation, address(0), hex"", hex"", initConfig);
     }
 }
