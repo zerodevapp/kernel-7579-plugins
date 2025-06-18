@@ -12,9 +12,7 @@ contract CallerHook is IHook {
     function onInstall(bytes calldata data) external payable {
         installed[msg.sender] = true;
         address[] memory accounts = abi.decode(data, (address[]));
-        for (uint256 i = 0; i < accounts.length; i++) {
-            allowedAccounts[msg.sender] = accounts;
-        }
+        allowedAccounts[msg.sender] = accounts;
     }
 
     function onUninstall(bytes calldata) external payable {

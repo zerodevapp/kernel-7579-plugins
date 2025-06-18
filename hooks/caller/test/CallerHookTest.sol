@@ -58,6 +58,56 @@ contract CallerHookTest is Test {
         MockAction(address(kernel)).doSomething();
     }
 
+    function test_update() public {
+        address template = address(new Kernel(IEntryPoint(ENTRYPOINT_0_7_ADDR)));
+        KernelFactory factory = new KernelFactory(address(template));
+        Kernel kernel = Kernel(payable(factory.createAccount(initData(), bytes32(0))));
+
+        vm.startPrank(address(kernel));
+        callerHook.onInstall(abi.encode(accounts));
+        assertTrue(callerHook.installed(address(kernel)));
+        for (uint256 i = 0; i < accounts.length; i++) {
+            assertEq(callerHook.allowedAccounts(address(kernel), i), accounts[i]);
+        }
+
+        address[] memory newAccounts = new address[](2);
+        newAccounts[0] = makeAddr("New Acc1");
+        newAccounts[1] = makeAddr("New Acc2");
+        // do update
+        address(kernel).call(
+            abi.encodeWithSelector(
+                Kernel.installModule.selector,
+                3,
+                address(mockAction),
+                abi.encodePacked(
+                    MockAction.doSomething.selector,
+                    address(callerHook),
+                    abi.encode(hex"ff", abi.encodePacked(bytes1(0xff), abi.encode(newAccounts)))
+                )
+            )
+        );
+        assertTrue(callerHook.installed(address(kernel)));
+        for (uint256 i = 0; i < accounts.length; i++) {
+            assertEq(callerHook.allowedAccounts(address(kernel), i), newAccounts[i]);
+        }
+
+        vm.stopPrank();
+
+        vm.prank(newAccounts[0]);
+        MockAction(address(kernel)).doSomething();
+
+        vm.prank(newAccounts[1]);
+        MockAction(address(kernel)).doSomething();
+
+        vm.prank(accounts[0]);
+        vm.expectRevert();
+        MockAction(address(kernel)).doSomething();
+
+        vm.prank(accounts[1]);
+        vm.expectRevert();
+        MockAction(address(kernel)).doSomething();
+    }
+
     function initData() internal view returns (bytes memory) {
         return abi.encodeWithSelector(Kernel.initialize.selector, rootValidation, address(0), hex"", hex"", initConfig);
     }
