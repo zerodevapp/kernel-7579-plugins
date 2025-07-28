@@ -118,8 +118,10 @@ contract WebAuthnSigner is SignerBase {
      */
 
     function _signerOninstall(bytes32 id, bytes calldata _data) internal override {
-        // check if the webauthn validator is already initialized
-        if (_isInitialized(msg.sender)) revert AlreadyInitialized(msg.sender);
+        // check if this specific id is already initialized
+        if (webAuthnSignerStorage[id][msg.sender].pubKeyX != 0) {
+            revert AlreadyInitialized(msg.sender);
+        }
         usedIds[msg.sender]++;
         // check validity of the public key
         (WebAuthnSignerData memory webAuthnData, bytes32 authenticatorIdHash) =
@@ -138,7 +140,10 @@ contract WebAuthnSigner is SignerBase {
      * @dev The kernel account need to be the `msg.sender`.
      */
     function _signerOnUninstall(bytes32 id, bytes calldata) internal override {
-        if (!_isInitialized(msg.sender)) revert NotInitialized(msg.sender);
+        // check if this specific id is initialized
+        if (webAuthnSignerStorage[id][msg.sender].pubKeyX == 0) {
+            revert NotInitialized(msg.sender);
+        }
         delete webAuthnSignerStorage[id][msg.sender];
         usedIds[msg.sender]--;
     }
