@@ -105,3 +105,6 @@ branch = release/v3.1
 [submodule "validators/erc1271/lib/safe-smart-account"]
 	path = validators/erc1271/lib/safe-smart-account
 	url = https://github.com/safe-global/safe-smart-account
+[submodule "lib/safe-smart-account"]
+	path = lib/safe-smart-account
+	url = https://github.com/safe-global/safe-smart-account
