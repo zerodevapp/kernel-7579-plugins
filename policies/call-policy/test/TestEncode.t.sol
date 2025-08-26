@@ -47,6 +47,8 @@ contract TestEncoding is Test {
             return bytes32(uint256(param - random));
         } else if (condition == ParamCondition.LESS_THAN_OR_EQUAL) {
             return bytes32(uint256(param + random));
+        } else if (condition == ParamCondition.NOT_EQUAL) {
+            return bytes32(uint256(param));
         }
         return bytes32(0);
     }
@@ -65,6 +67,8 @@ contract TestEncoding is Test {
             return bytes32(uint256(param) + random - 1);
         } else if (condition == ParamCondition.LESS_THAN_OR_EQUAL) {
             return bytes32(uint256(param) - random + 1);
+        } else if (condition == ParamCondition.NOT_EQUAL) {
+            return bytes32(uint256(param) + random);
         }
         return bytes32(0);
     }
@@ -124,6 +128,17 @@ contract TestEncoding is Test {
         testSingle(4, valueLimit, value, anyTarget, res, param, random);
     }
 
+    function testNotEqualSingle(
+        uint256 valueLimit,
+        uint256 value,
+        bool anyTarget,
+        uint8 res,
+        uint256 param,
+        uint256 random
+    ) external {
+        testSingle(5, valueLimit, value, anyTarget, res, param, random);
+    }
+
     function testSingle(
         uint8 c,
         uint256 valueLimit,
@@ -133,10 +148,10 @@ contract TestEncoding is Test {
         uint256 param,
         uint256 random
     ) public {
-        vm.assume(c <= uint8(ParamCondition.LESS_THAN_OR_EQUAL));
+        vm.assume(c <= uint8(ParamCondition.NOT_EQUAL));
         vm.assume(valueLimit < type(uint256).max);
         vm.assume(value <= valueLimit);
-        vm.assume(res <= 3);
+        vm.assume(res <= uint8(Result.TargetViolation));
 
         ParamCondition condition = ParamCondition(c);
         param = param % (uint256(type(uint128).max) + 1) + 1;
