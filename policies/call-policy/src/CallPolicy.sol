@@ -153,6 +153,52 @@ contract CallPolicy is PolicyBase {
                 if (!oneOfStatus) {
                     return false;
                 }
+            } else if (rule.condition == ParamCondition.SLICE_EQUAL) {
+                require(rule.params.length == 3, "slice equal condition must have 3 params");
+                uint256 start = uint256(rule.params[0]);
+                uint256 length = uint256(rule.params[1]);
+                bytes32 expectedHash = rule.params[2];
+                uint256 paramOffset = 4 + rule.offset;
+                {
+                    uint256 dataOffset;
+                    assembly {
+                        dataOffset := data.offset
+                    }
+                    console.log("DataOffset", dataOffset);
+                    //for testing
+                    bytes calldata dataSlice;
+                    uint256 dataSliceOffset;
+                    uint256 dataSliceLength;
+                    assembly {
+                        dataSlice.offset := add(calldataload(add(data.offset, paramOffset)), add(data.offset, 0x04))
+                        dataSliceOffset := dataSlice.offset
+                        dataSlice.length := calldataload(dataSlice.offset)
+                        dataSliceLength := calldataload(dataSlice.offset)
+                    }
+                    console.log("DataSliceOffset", dataSliceOffset);
+                    console.log("DataSliceLength", dataSliceLength);
+                    console.log("DataSlice");
+                    console.logBytes(dataSlice);
+                }
+
+                // data[4 +rule.offset] : offset of the actual data
+                bytes32 actualHash;
+                bytes calldata actualParam;
+                assembly {
+                    let memPtr := mload(0x40)
+                    let dataOffset := add(calldataload(add(data.offset, paramOffset)), add(data.offset, 0x04))
+                    actualParam.offset := add(dataOffset, add(start, 0x20))
+                    actualParam.length := length
+                    //debug_word := calldataload(compareOffset)
+                    //calldatacopy(memPtr, compareOffset, length)
+                    //actualHash := keccak256(memPtr, length)
+                }
+                console.log("Param :");
+                console.logBytes(actualParam);
+                actualHash = keccak256(actualParam);
+                if (actualHash != expectedHash) {
+                    return false;
+                }
             }
         }
         return true;
@@ -186,8 +232,16 @@ contract CallPolicy is PolicyBase {
 
             // check if the params length is correct
             for (uint256 j = 0; j < permissions[i].rules.length; j++) {
-                if (permissions[i].rules[j].condition != ParamCondition.ONE_OF) {
-                    require(permissions[i].rules[j].params.length == 1, "only OneOf condition can have multiple params");
+                if (
+                    permissions[i].rules[j].condition != ParamCondition.ONE_OF
+                        && permissions[i].rules[j].condition != ParamCondition.SLICE_EQUAL
+                ) {
+                    require(
+                        permissions[i].rules[j].params.length == 1,
+                        "only OneOf and SliceEqual condition can have multiple params"
+                    );
+                } else if (permissions[i].rules[j].condition == ParamCondition.SLICE_EQUAL) {
+                    require(permissions[i].rules[j].params.length == 3, "slice equal condition must have 3 params");
                 }
             }
 

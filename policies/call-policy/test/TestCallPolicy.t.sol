@@ -23,7 +23,7 @@ enum Result {
     TargetViolation
 }
 
-contract TestEncoding is Test {
+contract TestCallPolicy is Test {
     CallPolicy callPolicy;
 
     MockCallee mock;
@@ -31,6 +31,87 @@ contract TestEncoding is Test {
     function setUp() external {
         callPolicy = new CallPolicy();
         mock = new MockCallee();
+    }
+
+    function wrongParamSlice(uint256 param, uint256 random) internal view returns (bytes memory) {
+        // param == bytes1(start) + bytes1(end) + bytes1(repeat) + bytes29(data)
+        uint256 start = param % 256;
+        uint256 repeat = (param / 256 / 256) % 256 % 8 + start + 1;
+        uint256 length = ((param / 256) % 256) % (repeat * 29) + 1;
+        if (start + length > repeat * 29) {
+            length = start - repeat * 29;
+        }
+        bytes29 data = bytes29(uint232(param / 256 / 256 / 256));
+
+        bytes memory dataBytes = new bytes(29 * (repeat) + 1);
+        for (uint256 i = 0; i < repeat; i++) {
+            for (uint256 j = 0; j < 29; j++) {
+                dataBytes[i * 29 + j] = data[j];
+            }
+        }
+
+        uint8 wrongType = uint8(random % 3);
+        // 0 : completely wrong, add wrongType + 1 to wrongData
+        // 1 : leftshift, wrondData[i] = dataBytes[i + 1]
+        // 2 : rightshift, wrongData[i] = dataBytes[i - 1]
+        bytes memory wrongData = new bytes(29 * repeat + 1);
+        console.log("Wrong Type :", wrongType);
+
+        unchecked {
+            for (uint256 i = 0; i < 29 * (repeat); i++) {
+                if (wrongType == 0) {
+                    wrongData[i] = bytes1(uint8(dataBytes[i]) + uint8(wrongType + 1));
+                } else if (wrongType == 1) {
+                    if (i == start + length) {
+                        wrongData[i] = bytes1(uint8(dataBytes[i + 1]) - 1);
+                    }
+                    wrongData[i] = bytes1(uint8(dataBytes[i + 1]) + i == start ? 1 : 0);
+                } else if (wrongType == 2) {
+                    if (i == start || i == 0) {
+                        wrongData[i] = bytes1(uint8(dataBytes[start]) - 1);
+                    } else {
+                        wrongData[i] = bytes1(uint8(dataBytes[i - 1]) + i == start ? 1 : 0);
+                    }
+                }
+            }
+        }
+
+        return wrongData;
+    }
+
+    function goodParamSlice(uint256 param, uint256 random) internal view returns (bytes memory) {
+        // param == bytes1(start) + bytes1(end) + bytes1(repeat) + bytes29(data)
+        uint256 start = param % 256;
+        uint256 repeat = (param / 256 / 256) % 256 % 8 + start + 1;
+        uint256 length = ((param / 256) % 256) % (repeat * 29) + 1;
+        if (start + length > repeat * 29) {
+            length = start - repeat * 29;
+        }
+        bytes29 data = bytes29(uint232(param / 256 / 256 / 256));
+
+        console.log("start", start);
+        console.log("length", length);
+        console.log("repeat", repeat);
+        console.logBytes(abi.encodePacked(data));
+
+        bytes memory dataBytes = new bytes(29 * (repeat));
+        for (uint256 i = 0; i < repeat; i++) {
+            for (uint256 j = 0; j < 29; j++) {
+                dataBytes[i * 29 + j] = data[j];
+            }
+        }
+
+        console.logBytes(dataBytes);
+        return dataBytes;
+    }
+
+    function subStr(bytes memory param, uint256 start, uint256 length) internal view returns (bytes memory res) {
+        console.log("substr");
+        res = new bytes(length);
+        for (uint256 i = 0; i < length; i++) {
+            res[i] = param[start + i];
+        }
+        console.log("SUBSTR");
     }
 
     function wrongParam(ParamCondition condition, uint256 param, uint256 random) internal pure returns (bytes32) {
@@ -326,22 +407,17 @@ contract TestEncoding is Test {
         vm.stopPrank();
     }
 
-    function testOneOf(
-        uint256 valueLimit,
-        uint256 value,
-        bool anyTarget,
-        uint8 res,
-        uint256 param,
-        uint256 random
-    ) external {
+    function testOneOf(uint256 valueLimit, uint256 value, bool anyTarget, uint8 res, uint256 param, uint256 random)
+        external
+    {
         vm.assume(valueLimit < type(uint256).max);
         vm.assume(value <= valueLimit);
         vm.assume(res <= uint8(Result.TargetViolation));
 
-        param = param % (uint256(type(uint128).max) + 1) +1;
+        param = param % (uint256(type(uint128).max) + 1) + 1;
         random = (random % param) + 1;
-        
-        if(anyTarget && res == 3) {
+
+        if (anyTarget && res == 3) {
             res--;
         }
         Result result = Result(res);
@@ -351,22 +427,18 @@ contract TestEncoding is Test {
         bytes4 selector = mock.foo.selector;
 
         bytes32[] memory params = new bytes32[](10);
-        for(uint256 i = 0; i < 10; i++) {
+        for (uint256 i = 0; i < 10; i++) {
             params[i] = keccak256(abi.encodePacked(param, i));
         }
         ParamRule[] memory rules = new ParamRule[](1);
-        rules[0] = ParamRule({
-            condition : ParamCondition.ONE_OF,
-            offset : 0x00,
-            params : params
-        });
+        rules[0] = ParamRule({condition: ParamCondition.ONE_OF, offset: 0x00, params: params});
 
         Permission memory p = Permission({
-            callType : CallType.wrap(0x00),
-            target : anyTarget ? address(0) : address(mock),
-            selector : selector,
-            valueLimit : valueLimit,
-            rules : rules
+            callType: CallType.wrap(0x00),
+            target: anyTarget ? address(0) : address(mock),
+            selector: selector,
+            valueLimit: valueLimit,
+            rules: rules
         });
 
         Permission[] memory perms = new Permission[](1);
@@ -378,40 +450,125 @@ contract TestEncoding is Test {
 
         // check if pass
         PackedUserOperation memory op = PackedUserOperation({
-            sender : owner,
-            nonce : 0,
-            initCode : hex"",
-            callData : abi.encodeWithSelector(
+            sender: owner,
+            nonce: 0,
+            initCode: hex"",
+            callData: abi.encodeWithSelector(
                 IERC7579Account.execute.selector,
                 bytes32(0),
                 ExecLib.encodeSingle(
-                    result == Result.TargetViolation? address(1) : address(mock),
+                    result == Result.TargetViolation ? address(1) : address(mock),
                     result == Result.ValueViolation ? valueLimit + 1 : value,
                     abi.encodeWithSelector(
                         selector,
-                        result == Result.ParamRuleViolation ? wrongParam(ParamCondition.ONE_OF, param, random) : goodParam(ParamCondition.ONE_OF, param, random),
+                        result == Result.ParamRuleViolation
+                            ? wrongParam(ParamCondition.ONE_OF, param, random)
+                            : goodParam(ParamCondition.ONE_OF, param, random),
                         hex"deadbeef"
                     )
                 )
             ),
-            accountGasLimits : bytes32(0),
-            preVerificationGas : 0,
-            gasFees : bytes32(0),
-            paymasterAndData : hex"",
-            signature : hex""
+            accountGasLimits: bytes32(0),
+            preVerificationGas: 0,
+            gasFees: bytes32(0),
+            paymasterAndData: hex"",
+            signature: hex""
         });
         vm.startPrank(owner);
-        if(result == Result.ParamRuleViolation) { 
+        if (result == Result.ParamRuleViolation) {
             vm.expectRevert(CallPolicy.CallViolatesParamRule.selector);
-        } else if(result == Result.ValueViolation) {
+        } else if (result == Result.ValueViolation) {
             vm.expectRevert(CallPolicy.CallViolatesValueRule.selector);
-        } else if(result == Result.TargetViolation) {
+        } else if (result == Result.TargetViolation) {
             vm.expectRevert(CallPolicy.CallViolatesTargetRule.selector);
         }
-        callPolicy.checkUserOpPolicy(
-            id,
-            op
-        );
+        callPolicy.checkUserOpPolicy(id, op);
+        vm.stopPrank();
+    }
+
+    function testSliceEqual(uint256 valueLimit, uint256 value, bool anyTarget, uint8 res, uint256 param, uint256 random)
+        external
+    {
+        vm.assume(valueLimit < type(uint256).max);
+        vm.assume(value <= valueLimit);
+        vm.assume(res <= uint8(Result.TargetViolation));
+
+        param = param % (uint256(type(uint128).max) + 1) + 1;
+        random = (random % param) + 1;
+
+        if (anyTarget && res == 3) {
+            res--;
+        }
+        Result result = Result(res);
+
+        bytes32 id = bytes32(bytes4(0x12345678));
+        address owner = makeAddr("Owner");
+        bytes4 selector = mock.foo.selector;
+
+        // param == bytes1(start) + bytes1(end) + bytes1(repeat) + bytes29(data)
+        uint256 start = param % 256;
+        uint256 repeat = (param / 256 / 256) % 256 % 8 + start + 1;
+        uint256 length = ((param / 256) % 256) % (repeat * 29) + 1;
+        if (start + length > repeat * 29) {
+            length = start - repeat * 29;
+        }
+        bytes29 data = bytes29(uint232(param / 256 / 256 / 256));
+
+        bytes32[] memory params = new bytes32[](3);
+        params[0] = bytes32(start);
+        params[1] = bytes32(length);
+        params[2] = keccak256(subStr(goodParamSlice(param, random), start, length));
+        ParamRule[] memory rules = new ParamRule[](1);
+        rules[0] = ParamRule({condition: ParamCondition.SLICE_EQUAL, offset: 0x20, params: params});
+
+        Permission memory p = Permission({
+            callType: CallType.wrap(0x00),
+            target: anyTarget ? address(0) : address(mock),
+            selector: selector,
+            valueLimit: valueLimit,
+            rules: rules
+        });
+
+        Permission[] memory perms = new Permission[](1);
+        perms[0] = p;
+
+        vm.startPrank(owner);
+        callPolicy.onInstall(abi.encodePacked(id, abi.encode(perms)));
+        vm.stopPrank();
+
+        // check if pass
+        PackedUserOperation memory op = PackedUserOperation({
+            sender: owner,
+            nonce: 0,
+            initCode: hex"",
+            callData: abi.encodeWithSelector(
+                IERC7579Account.execute.selector,
+                bytes32(0),
+                ExecLib.encodeSingle(
+                    result == Result.TargetViolation ? address(1) : address(mock),
+                    result == Result.ValueViolation ? valueLimit + 1 : value,
+                    abi.encodeWithSelector(
+                        selector,
+                        bytes32(0),
+                        result == Result.ParamRuleViolation ? wrongParamSlice(param, random) : goodParamSlice(param, random)
+                    )
+                )
+            ),
+            accountGasLimits: bytes32(0),
+            preVerificationGas: 0,
+            gasFees: bytes32(0),
+            paymasterAndData: hex"",
+            signature: hex""
+        });
+        vm.startPrank(owner);
+        if (result == Result.ParamRuleViolation) {
+            vm.expectRevert(CallPolicy.CallViolatesParamRule.selector);
+        } else if (result == Result.ValueViolation) {
+            vm.expectRevert(CallPolicy.CallViolatesValueRule.selector);
+        } else if (result == Result.TargetViolation) {
+            vm.expectRevert(CallPolicy.CallViolatesTargetRule.selector);
+        }
+        callPolicy.checkUserOpPolicy(id, op);
         vm.stopPrank();
     }
 }

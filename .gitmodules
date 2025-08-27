@@ -51,10 +51,6 @@
 [submodule "policies/call-policy/lib/forge-std"]
 	path = policies/call-policy/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
-[submodule "policies/call-policy/lib/kernel_v3"]
-	path = policies/call-policy/lib/kernel_v3
-	url = https://github.com/zerodevapp/kernel
-	branch = release/v3.1
 [submodule "policies/ratelimit/lib/forge-std"]
 	path = policies/ratelimit/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
@@ -106,10 +102,6 @@ branch = release/v3.1
 [submodule "hooks/onlyEntrypoint/lib/forge-std"]
 	path = hooks/onlyEntrypoint/lib/forge-std
 	url = https://github.com/foundry-rs/forge-std
-[submodule "hooks/onlyEntrypoint/lib/kernel_v3"]
-	path = hooks/onlyEntrypoint/lib/kernel_v3
-	url = https://github.com/zerodevapp/kernel
-	branch = release/v3.1
 [submodule "signers/webauthn/lib/kernel"]
 	path = signers/webauthn/lib/kernel
 	url = https://github.com/zerodevapp/kernel
@@ -147,3 +139,9 @@ branch = release/v3.1
 [submodule "lib/safe-smart-account"]
 	path = lib/safe-smart-account
 	url = https://github.com/safe-global/safe-smart-account
+[submodule "hooks/onlyEntrypoint/lib/kernel"]
+	path = hooks/onlyEntrypoint/lib/kernel
+	url = https://github.com/zerodevapp/kernel
+[submodule "policies/call-policy/lib/kernel"]
+	path = policies/call-policy/lib/kernel
+	url = https://github.com/zerodevapp/kernel
