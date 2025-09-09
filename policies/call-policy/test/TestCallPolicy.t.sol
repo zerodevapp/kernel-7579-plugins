@@ -33,7 +33,7 @@ contract TestCallPolicy is Test {
         mock = new MockCallee();
     }
 
-    function wrongParamSlice(uint256 param, uint256 random) internal view returns (bytes memory) {
+    function wrongParamSubstr(uint256 param, uint256 random) internal view returns (bytes memory) {
         // param == bytes1(start) + bytes1(end) + bytes1(repeat) + bytes29(data)
         uint256 start = param % 256;
         uint256 repeat = (param / 256 / 256) % 256 % 8 + start + 1;
@@ -79,7 +79,7 @@ contract TestCallPolicy is Test {
         return wrongData;
     }
 
-    function goodParamSlice(uint256 param, uint256 random) internal view returns (bytes memory) {
+    function goodParamSubstr(uint256 param, uint256 random) internal view returns (bytes memory) {
         // param == bytes1(start) + bytes1(end) + bytes1(repeat) + bytes29(data)
         uint256 start = param % 256;
         uint256 repeat = (param / 256 / 256) % 256 % 8 + start + 1;
@@ -484,8 +484,8 @@ contract TestCallPolicy is Test {
         vm.stopPrank();
     }
 
-    function testSliceEqual1() external {
-        testSliceEqual(
+    function testSubstrEqual1() external {
+        testSubstrEqual(
             0,
             0,
             false,
@@ -495,7 +495,7 @@ contract TestCallPolicy is Test {
         );
     }
 
-    function testSliceEqual(uint256 valueLimit, uint256 value, bool anyTarget, uint8 res, uint256 param, uint256 random)
+    function testSubstrEqual(uint256 valueLimit, uint256 value, bool anyTarget, uint8 res, uint256 param, uint256 random)
         public
     {
         vm.assume(valueLimit < type(uint256).max);
@@ -526,9 +526,9 @@ contract TestCallPolicy is Test {
         bytes32[] memory params = new bytes32[](3);
         params[0] = bytes32(start);
         params[1] = bytes32(length);
-        params[2] = keccak256(subStr(goodParamSlice(param, random), start, length));
+        params[2] = keccak256(subStr(goodParamSubstr(param, random), start, length));
         ParamRule[] memory rules = new ParamRule[](1);
-        rules[0] = ParamRule({condition: ParamCondition.SLICE_EQUAL, offset: 0x20, params: params});
+        rules[0] = ParamRule({condition: ParamCondition.SUBSTR_EQUAL, offset: 0x20, params: params});
 
         Permission memory p = Permission({
             callType: CallType.wrap(0x00),
@@ -559,7 +559,7 @@ contract TestCallPolicy is Test {
                     abi.encodeWithSelector(
                         selector,
                         bytes32(0),
-                        result == Result.ParamRuleViolation ? wrongParamSlice(param, random) : goodParamSlice(param, random)
+                        result == Result.ParamRuleViolation ? wrongParamSubstr(param, random) : goodParamSubstr(param, random)
                     )
                 )
             ),

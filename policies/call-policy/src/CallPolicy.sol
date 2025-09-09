@@ -26,7 +26,7 @@ enum ParamCondition {
     LESS_THAN_OR_EQUAL,
     NOT_EQUAL,
     ONE_OF,
-    SLICE_EQUAL
+    SUBSTR_EQUAL
 }
 
 enum Status {
@@ -153,8 +153,8 @@ contract CallPolicy is PolicyBase {
                 if (!oneOfStatus) {
                     return false;
                 }
-            } else if (rule.condition == ParamCondition.SLICE_EQUAL) {
-                require(rule.params.length == 3, "slice equal condition must have 3 params");
+            } else if (rule.condition == ParamCondition.SUBSTR_EQUAL) {
+                require(rule.params.length == 3, "substr equal condition must have 3 params");
                 uint256 start = uint256(rule.params[0]);
                 uint256 length = uint256(rule.params[1]);
                 bytes32 expectedHash = rule.params[2];
@@ -211,14 +211,14 @@ contract CallPolicy is PolicyBase {
             for (uint256 j = 0; j < permissions[i].rules.length; j++) {
                 if (
                     permissions[i].rules[j].condition != ParamCondition.ONE_OF
-                        && permissions[i].rules[j].condition != ParamCondition.SLICE_EQUAL
+                        && permissions[i].rules[j].condition != ParamCondition.SUBSTR_EQUAL
                 ) {
                     require(
                         permissions[i].rules[j].params.length == 1,
-                        "only OneOf and SliceEqual condition can have multiple params"
+                        "only OneOf and SubstrEqual condition can have multiple params"
                     );
-                } else if (permissions[i].rules[j].condition == ParamCondition.SLICE_EQUAL) {
-                    require(permissions[i].rules[j].params.length == 3, "slice equal condition must have 3 params");
+                } else if (permissions[i].rules[j].condition == ParamCondition.SUBSTR_EQUAL) {
+                    require(permissions[i].rules[j].params.length == 3, "substr equal condition must have 3 params");
                 }
             }
 
