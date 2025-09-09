@@ -106,12 +106,10 @@ contract TestCallPolicy is Test {
     }
 
     function subStr(bytes memory param, uint256 start, uint256 length) internal view returns (bytes memory res) {
-        console.log("substr");
         res = new bytes(length);
         for (uint256 i = 0; i < length; i++) {
             res[i] = param[start + i];
         }
-        console.log("SUBSTR");
     }
 
     function wrongParam(ParamCondition condition, uint256 param, uint256 random) internal pure returns (bytes32) {
@@ -486,8 +484,19 @@ contract TestCallPolicy is Test {
         vm.stopPrank();
     }
 
+    function testSliceEqual1() external {
+        testSliceEqual(
+            0,
+            0,
+            false,
+            0,
+            0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80,
+            0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d
+        );
+    }
+
     function testSliceEqual(uint256 valueLimit, uint256 value, bool anyTarget, uint8 res, uint256 param, uint256 random)
-        external
+        public
     {
         vm.assume(valueLimit < type(uint256).max);
         vm.assume(value <= valueLimit);

@@ -3,7 +3,6 @@ pragma solidity ^0.8.0;
 import "kernel/sdk/moduleBase/PolicyBase.sol";
 import "kernel/utils/ExecLib.sol";
 import {IERC7579Account} from "kernel/interfaces/IERC7579Account.sol";
-import "forge-std/console.sol";
 
 struct Permission {
     CallType callType; // calltype can be CALLTYPE_SINGLE/CALLTYPE_DELEGATECALL
@@ -42,6 +41,7 @@ contract CallPolicy is PolicyBase {
     error CallViolatesTargetRule();
     error CallViolatesParamRule();
     error CallViolatesValueRule();
+    error ParamTooShort();
 
     mapping(address => uint256) public usedIds;
     mapping(bytes32 id => mapping(address => Status)) public status;
@@ -159,42 +159,19 @@ contract CallPolicy is PolicyBase {
                 uint256 length = uint256(rule.params[1]);
                 bytes32 expectedHash = rule.params[2];
                 uint256 paramOffset = 4 + rule.offset;
-                {
-                    uint256 dataOffset;
-                    assembly {
-                        dataOffset := data.offset
-                    }
-                    console.log("DataOffset", dataOffset);
-                    //for testing
-                    bytes calldata dataSlice;
-                    uint256 dataSliceOffset;
-                    uint256 dataSliceLength;
-                    assembly {
-                        dataSlice.offset := add(calldataload(add(data.offset, paramOffset)), add(data.offset, 0x04))
-                        dataSliceOffset := dataSlice.offset
-                        dataSlice.length := calldataload(dataSlice.offset)
-                        dataSliceLength := calldataload(dataSlice.offset)
-                    }
-                    console.log("DataSliceOffset", dataSliceOffset);
-                    console.log("DataSliceLength", dataSliceLength);
-                    console.log("DataSlice");
-                    console.logBytes(dataSlice);
-                }
 
                 // data[4 +rule.offset] : offset of the actual data
                 bytes32 actualHash;
                 bytes calldata actualParam;
+                uint256 paramLength;
                 assembly {
                     let memPtr := mload(0x40)
                     let dataOffset := add(calldataload(add(data.offset, paramOffset)), add(data.offset, 0x04))
                     actualParam.offset := add(dataOffset, add(start, 0x20))
+                    paramLength := calldataload(dataOffset)
                     actualParam.length := length
-                    //debug_word := calldataload(compareOffset)
-                    //calldatacopy(memPtr, compareOffset, length)
-                    //actualHash := keccak256(memPtr, length)
                 }
-                console.log("Param :");
-                console.logBytes(actualParam);
+                require(paramLength >= start + length, ParamTooShort());
                 actualHash = keccak256(actualParam);
                 if (actualHash != expectedHash) {
                     return false;
