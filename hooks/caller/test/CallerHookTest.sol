@@ -3,11 +3,11 @@ pragma solidity ^0.8.13;
 import {CallerHook} from "../src/CallerHook.sol";
 import {Test} from "forge-std/Test.sol";
 import {MockAction} from "./mock/MockAction.sol";
-import {Kernel} from "kernel/src/Kernel.sol";
-import {IEntryPoint} from "kernel/src/interfaces/IEntryPoint.sol";
+import {Kernel} from "kernel/Kernel.sol";
+import {IEntryPoint} from "kernel/interfaces/IEntryPoint.sol";
 import {MockValidator} from "./mock/MockValidator.sol";
-import {ValidatorLib, ValidationId} from "kernel/src/utils/ValidationTypeLib.sol";
-import {KernelFactory} from "kernel/src/factory/KernelFactory.sol";
+import {ValidatorLib, ValidationId} from "kernel/utils/ValidationTypeLib.sol";
+import {KernelFactory} from "kernel/factory/KernelFactory.sol";
 address constant ENTRYPOINT_0_7_ADDR = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
 contract CallerHookTest is Test {
     CallerHook public callerHook;

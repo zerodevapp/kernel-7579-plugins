@@ -1,7 +1,7 @@
 pragma solidity ^0.8.13;
 
-import {IHook} from "kernel/src/interfaces/IERC7579Modules.sol";
-import {MODULE_TYPE_HOOK} from "kernel/src/types/Constants.sol";
+import {IHook} from "kernel/interfaces/IERC7579Modules.sol";
+import {MODULE_TYPE_HOOK} from "kernel/types/Constants.sol";
 
 contract CallerHook is IHook {
     mapping(address => bool) public installed;
@@ -34,5 +34,5 @@ contract CallerHook is IHook {
         return hex"";
     }
 
-    function postCheck(bytes calldata) external payable override {}
+    function postCheck(bytes calldata, bool, bytes calldata) external payable override {}
 }

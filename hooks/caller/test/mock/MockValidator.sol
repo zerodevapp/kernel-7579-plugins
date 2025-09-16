@@ -2,7 +2,7 @@
 
 pragma solidity ^0.8.0;
 
-import "kernel/src/interfaces/IERC7579Modules.sol";
+import "kernel/interfaces/IERC7579Modules.sol";
 
 contract MockValidator is IValidator, IHook {
     mapping(address => bool) public initialized;
@@ -73,7 +73,7 @@ contract MockValidator is IValidator, IHook {
         return hex"";
     }
 
-    function postCheck(bytes calldata hookData) external payable {
+    function postCheck(bytes calldata hookData, bool executionSuccess, bytes calldata executionReturn) external payable {
         return;
     }
 }
