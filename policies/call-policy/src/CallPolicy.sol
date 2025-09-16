@@ -1,7 +1,7 @@
 pragma solidity ^0.8.0;
 
-import "kernel/sdk/moduleBase/PolicyBase.sol";
-import "kernel/utils/ExecLib.sol";
+import "kernel_v3/sdk/moduleBase/PolicyBase.sol";
+import "kernel_v3/utils/ExecLib.sol";
 import {IERC7579Account} from "kernel/interfaces/IERC7579Account.sol";
 
 struct Permission {
