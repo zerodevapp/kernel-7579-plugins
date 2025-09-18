@@ -1,6 +1,6 @@
 pragma solidity ^0.8.0;
 
-import "kernel/sdk/moduleBase/PolicyBase.sol";
+import "kernel_v3/sdk/moduleBase/PolicyBase.sol";
 import {packValidationData, ValidAfter, ValidUntil} from "kernel/types/Types.sol";
 
 enum Status {
