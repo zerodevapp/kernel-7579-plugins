@@ -39,7 +39,7 @@ contract RateLimitPolicyReset is PolicyBase {
     ///      - next 6 bytes: uint48 initialCount.
     function _policyOninstall(bytes32 id, bytes calldata _data) internal override {
         console.logBytes(_data);
-        require(status[id][msg.sender] != Status.Live);
+        require(status[id][msg.sender] == Status.NA);
         require(_data.length >= 12, "Invalid data length");
         uint48 interval = uint48(bytes6(_data[0:6]));
         uint48 initialCount = uint48(bytes6(_data[6:12]));
