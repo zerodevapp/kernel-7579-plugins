@@ -1,8 +1,0 @@
-HttpRequestError: HTTP request failed.
-
-Status: 400
-URL: https://rpc.zerodev.app/api/v3/55569f2d-5bbf-43e5-90cc-75d43c26e007/chain/8333?provider=PIMLICO
-Request body: {"method":"zd_getUserOperationGasPrice","params":[]}
-
-Details: "Cannot read properties of undefined (reading 'slow')"
-Version: viem@2.31.3
