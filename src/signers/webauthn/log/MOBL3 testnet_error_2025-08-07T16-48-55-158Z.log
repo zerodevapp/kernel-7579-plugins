@@ -1,0 +1,7 @@
+TimeoutError: The request took too long to respond.
+
+URL: https://sepolia.mobl3.xyz
+Request body: {"method":"eth_chainId"}
+
+Details: The request timed out.
+Version: viem@2.31.3

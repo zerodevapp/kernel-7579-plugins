@@ -1,0 +1,8 @@
+HttpRequestError: HTTP request failed.
+
+Status: 400
+URL: https://rpc.zerodev.app/api/v2/bundler/5509f878-a6fe-4c6b-ad3c-1b3a120c39a1?provider=PIMLICO
+Request body: {"method":"eth_chainId"}
+
+Details: "request limit reached"
+Version: viem@2.23.6

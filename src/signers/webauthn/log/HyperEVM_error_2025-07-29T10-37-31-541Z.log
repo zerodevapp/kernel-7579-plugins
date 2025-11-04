@@ -1,0 +1,8 @@
+HttpRequestError: HTTP request failed.
+
+Status: 400
+URL: https://rpc.zerodev.app/api/v3/55569f2d-5bbf-43e5-90cc-75d43c26e007/chain/999?provider=PIMLICO
+Request body: {"method":"eth_getUserOperationReceipt","params":["0x2c9ef7995a7265c779c755d3b83d0fafb945797c6b6292d1c02e4afbc3b0c880"]}
+
+Details: "HTTP request failed.\n\nURL: https://rpc.hyperliquid.xyz/evm\nRequest body: {\"method\":\"eth_getLogs\",\"params\":[{\"address\":[\"0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789\",\"0x0000000071727De22E5E9d8BAf0edAc6f37da032\"],\"topics\":[\"0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f\",\"0x2c9ef7995a7265c779c755d3b83d0fafb945797c6b6292d1c02e4afbc3b0c880\",null,null],\"fromBlock\":\"0x93e5a9\",\"toBlock\":\"latest\"}]}\n\nDetails: Unexpected token 'r', \"rate limited\" is not valid JSON\nVersion: viem@2.27.0"
+Version: viem@2.31.3

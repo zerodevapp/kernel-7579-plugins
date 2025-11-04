@@ -1,0 +1,8 @@
+HttpRequestError: HTTP request failed.
+
+Status: 403
+URL: https://bartio.rpc.berachain.com
+Request body: {"method":"eth_chainId"}
+
+Details: "endpoint is disabled at quicknode.com"
+Version: viem@2.31.3

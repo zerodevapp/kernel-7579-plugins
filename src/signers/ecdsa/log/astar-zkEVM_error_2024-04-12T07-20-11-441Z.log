@@ -1,0 +1,3 @@
+Eip1559FeesNotSupportedError: Chain does not support EIP-1559 fees.
+
+Version: viem@2.9.16

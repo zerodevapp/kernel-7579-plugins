@@ -1,0 +1,3 @@
+InvalidEntryPointError: The entry point address (`entryPoint` = 0x0000000071727De22E5E9d8BAf0edAc6f37da032) is not a valid entry point. getSenderAddress did not revert with a SenderAddressResult error.
+
+Version: viem@2.31.3
