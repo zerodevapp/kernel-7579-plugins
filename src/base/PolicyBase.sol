@@ -17,7 +17,7 @@ abstract contract PolicyBase is IPolicy {
         _policyOnUninstall(id, _data);
     }
 
-    function isModuleType(uint256 id) external pure returns (bool) {
+    function isModuleType(uint256 id) external pure virtual returns (bool) {
         return id == 5;
     }
 
