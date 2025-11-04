@@ -1,0 +1,79 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [dev,fix/ci]
+    paths:
+      - '**.sol'
+      - '**.yml'
+  push:
+    branches: [dev,fix/ci]
+    paths:
+      - '**.sol'
+      - '**.yml'
+jobs:
+  tests:
+    name: Forge Testing
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        profile: [post-cancun,post-cancun-via-ir,solc-past-versions-0,via-ir,min-solc,min-solc-via-ir]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Install Dependencies
+        run: forge install
+      
+      - name: show list
+        run: ls
+
+      - name : pwd
+        run: pwd
+
+      - name: Run Tests with ${{ matrix.profile }}
+        run: >
+          ( [ "${{ matrix.profile }}" = "post-cancun" ] &&
+            forge test --use 0.8.25 --evm-version "cancun"
+          ) ||
+          ( [ "${{ matrix.profile }}" = "post-cancun-via-ir" ] &&
+            forge test --use 0.8.25 --evm-version "cancun" --via-ir
+          ) ||
+          ( [ "${{ matrix.profile }}" = "solc-past-versions-0" ] &&
+            forge test --use 0.8.23 --fuzz-runs 16 &&
+            forge test --use 0.8.24 --fuzz-runs 16
+          ) ||
+          ( [ "${{ matrix.profile }}" = "via-ir" ] &&
+            forge test --via-ir
+          ) ||
+          ( [ "${{ matrix.profile }}" = "min-solc" ] &&
+            forge fmt --check &&
+            forge test --use 0.8.23
+          ) ||
+          ( [ "${{ matrix.profile }}" = "min-solc-via-ir" ] &&
+            forge test --use 0.8.23 --via-ir
+          ) 
+
+  codespell:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run codespell
+        uses: codespell-project/actions-codespell@v2.0
+        with:
+          check_filenames: true
+          ignore_words_list: usera
+          skip: ./.git,package-lock.json,ackee-blockchain-solady-report.pdf,EIP712Mock.sol,yarn.lock
