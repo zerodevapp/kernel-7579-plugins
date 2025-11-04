@@ -1,8 +1,0 @@
-HttpRequestError: HTTP request failed.
-
-Status: 502
-URL: https://rpc-mammothon-g2-testnet-4a2w8v0xqy.t.conduit.xyz
-Request body: {"method":"eth_chainId"}
-
-Details: Bad Gateway
-Version: viem@2.31.3

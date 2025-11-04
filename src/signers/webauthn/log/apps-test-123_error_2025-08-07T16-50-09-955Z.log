@@ -1,8 +1,0 @@
-HttpRequestError: HTTP request failed.
-
-Status: 502
-URL: https://rpc-apps-test-123-7f7bjqu1x9.t.conduit.xyz
-Request body: {"method":"eth_chainId"}
-
-Details: Bad Gateway
-Version: viem@2.31.3

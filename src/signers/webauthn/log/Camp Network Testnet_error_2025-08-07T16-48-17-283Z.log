@@ -1,8 +1,0 @@
-HttpRequestError: HTTP request failed.
-
-Status: 502
-URL: https://rpc-camp-network-4xje7wy105.t.conduit.xyz
-Request body: {"method":"eth_chainId"}
-
-Details: Bad Gateway
-Version: viem@2.31.3

@@ -1,7 +1,0 @@
-HttpRequestError: HTTP request failed.
-
-URL: https://testnet.evo-chain.de
-Request body: {"method":"eth_chainId"}
-
-Details: fetch failed
-Version: viem@2.31.3

@@ -1,8 +1,0 @@
-HttpRequestError: HTTP request failed.
-
-Status: 502
-URL: https://rpc-silja-test-e2d-zerodev-2oyqd9850p.t.conduit.xyz
-Request body: {"method":"eth_chainId"}
-
-Details: Bad Gateway
-Version: viem@2.31.3
