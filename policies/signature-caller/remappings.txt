@@ -1,5 +1,0 @@
-ds-test/=lib/kernel_v3/lib/forge-std/lib/ds-test/src/
-account-abstraction/=dependencies/eth-infinitism-account-abstraction-0.8.0/contracts
-forge-std/=lib/forge-std/src/
-kernel/=lib/kernel_v3/src/
-solady/=lib/kernel_v3/lib/solady/src/

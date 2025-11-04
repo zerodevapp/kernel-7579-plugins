@@ -1,0 +1,8 @@
+HttpRequestError: HTTP request failed.
+
+Status: 502
+URL: https://rpc-memecoin-3-gy4apoe5lp.t.conduit.xyz
+Request body: {"method":"eth_chainId"}
+
+Details: Bad Gateway
+Version: viem@2.31.3

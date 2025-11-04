@@ -1,0 +1,7 @@
+HttpRequestError: HTTP request failed.
+
+URL: https://rpc.polygon-blackberry.gelato.digital
+Request body: {"method":"eth_chainId"}
+
+Details: fetch failed
+Version: viem@2.31.3

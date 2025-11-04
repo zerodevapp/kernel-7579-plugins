@@ -1,0 +1,8 @@
+HttpRequestError: HTTP request failed.
+
+Status: 400
+URL: https://real.drpc.org
+Request body: {"method":"eth_chainId"}
+
+Details: {"message":"method is not available on freetier, please upgrade to paid tier","code":35}
+Version: viem@2.31.3
