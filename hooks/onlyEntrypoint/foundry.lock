@@ -1,0 +1,236 @@
+{
+  "../../policies/sudo/lib/kernel_v3": {
+    "rev": "abe389c523dca48ad58f865097a863cb28ffbd8c"
+  },
+  "hooks/onlyEntrypoint/lib/forge-std": {
+    "rev": "6bce1540c7a5d1c40eec032a1ae16f0e01f82b92"
+  },
+  "../caller/lib/forge-std": {
+    "rev": "6bce1540c7a5d1c40eec032a1ae16f0e01f82b92"
+  },
+  "actions/recovery/lib/kernel_v3": {
+    "rev": "03f7f5cf5871cda0070e4223f196f5b577f6cde2"
+  },
+  "validators/webauthn/lib/kernel": {
+    "rev": "10c0997d71bc54383d83dfacd68baa9f21cbbfb0"
+  },
+  "../../actions/recovery/lib/kernel_v3": {
+    "rev": "03f7f5cf5871cda0070e4223f196f5b577f6cde2"
+  },
+  "policies/signature-caller/lib/forge-std": {
+    "rev": "e4aef94c1768803a16fe19f7ce8b65defd027cfd"
+  },
+  "../../policies/gas/lib/kernel_v3": {
+    "rev": "379417c7d4932537ec0781fe83d97239244bd11a"
+  },
+  "signers/ecdsa/lib/kernel_v3": {
+    "rev": "379417c7d4932537ec0781fe83d97239244bd11a"
+  },
+  "hooks/spendlingLimits/lib/forge-std": {
+    "rev": "978ac6fadb62f5f0b723c996f64be52eddba6801"
+  },
+  "../../policies/call-policy/lib/forge-std": {
+    "rev": "e4aef94c1768803a16fe19f7ce8b65defd027cfd"
+  },
+  "../../validators/webauthn/lib/kernel": {
+    "rev": "10c0997d71bc54383d83dfacd68baa9f21cbbfb0"
+  },
+  "signers/anysigner/lib/kernel_v3": {
+    "rev": "379417c7d4932537ec0781fe83d97239244bd11a"
+  },
+  "policies/timestamp/lib/kernel_v3": {
+    "rev": "49842d5629babc9af024f8571eb97409025028c3"
+  },
+  "../../policies/timestamp/lib/forge-std": {
+    "rev": "bb4ceea94d6f10eeb5b41dc2391c6c8bf8e734ef"
+  },
+  "../../signers/anysigner/lib/forge-std": {
+    "rev": "e4aef94c1768803a16fe19f7ce8b65defd027cfd"
+  },
+  "policies/signature-caller/lib/kernel_v3": {
+    "rev": "379417c7d4932537ec0781fe83d97239244bd11a"
+  },
+  "validators/erc1271/lib/kernel": {
+    "rev": "cd697c7e21715d015e0643af22310a99aa17433b"
+  },
+  "actions/recovery/lib/forge-std": {
+    "rev": "6bce1540c7a5d1c40eec032a1ae16f0e01f82b92"
+  },
+  "../../validators/webauthn/lib/forge-std": {
+    "rev": "e4aef94c1768803a16fe19f7ce8b65defd027cfd"
+  },
+  "lib/forge-std": {
+    "rev": "6bce1540c7a5d1c40eec032a1ae16f0e01f82b92"
+  },
+  "../../policies/ratelimit/lib/kernel_v3": {
+    "rev": "379417c7d4932537ec0781fe83d97239244bd11a"
+  },
+  "validators/webauthn/lib/openzeppelin-contracts": {
+    "rev": "0a5fba7a7ed726698477c7772be5d17afe69f118"
+  },
+  "lib/safe-smart-account": {
+    "rev": "bf943f80fec5ac647159d26161446ac5d716a294"
+  },
+  "policies/sudo/lib/kernel_v3": {
+    "rev": "abe389c523dca48ad58f865097a863cb28ffbd8c"
+  },
+  "policies/call-policy/lib/forge-std": {
+    "rev": "e4aef94c1768803a16fe19f7ce8b65defd027cfd"
+  },
+  "../../validators/webauthn/lib/FreshCryptoLib": {
+    "rev": "76f3f135b7b27d2aa519f265b56bfc49a2573ab5"
+  },
+  "../../policies/signature-caller/lib/forge-std": {
+    "rev": "e4aef94c1768803a16fe19f7ce8b65defd027cfd"
+  },
+  "signers/ecdsa/lib/solady": {
+    "rev": "e4a14a5b365b353352f7c38e699a2bc9363d6576"
+  },
+  "../../policies/timestamp/lib/kernel_v3": {
+    "rev": "49842d5629babc9af024f8571eb97409025028c3"
+  },
+  "../../signers/ecdsa/lib/kernel_v3": {
+    "rev": "379417c7d4932537ec0781fe83d97239244bd11a"
+  },
+  "../caller/lib/kernel": {
+    "rev": "03f7f5cf5871cda0070e4223f196f5b577f6cde2"
+  },
+  "policies/call-policy/lib/kernel_v3": {
+    "rev": "379417c7d4932537ec0781fe83d97239244bd11a"
+  },
+  "../../signers/ecdsa/lib/solady": {
+    "rev": "e4a14a5b365b353352f7c38e699a2bc9363d6576"
+  },
+  "../../signers/webauthn/lib/kernel": {
+    "rev": "10c0997d71bc54383d83dfacd68baa9f21cbbfb0"
+  },
+  "validators/erc1271/lib/solady": {
+    "rev": "b609a9c79ce541c2beca7a7d247665e7c93942a3"
+  },
+  "../../policies/gas/lib/forge-std": {
+    "rev": "bb4ceea94d6f10eeb5b41dc2391c6c8bf8e734ef"
+  },
+  "../../validators/erc1271/lib/safe-smart-account": {
+    "rev": "bf943f80fec5ac647159d26161446ac5d716a294"
+  },
+  "policies/gas/lib/forge-std": {
+    "rev": "bb4ceea94d6f10eeb5b41dc2391c6c8bf8e734ef"
+  },
+  "hooks/spendlingLimits/lib/kernel": {
+    "rev": "51e935d24e5e4a74996fe566e91faddb034aac75"
+  },
+  "../spendlingLimits/lib/forge-std": {
+    "rev": "978ac6fadb62f5f0b723c996f64be52eddba6801"
+  },
+  "policies/gas/lib/kernel_v3": {
+    "rev": "379417c7d4932537ec0781fe83d97239244bd11a"
+  },
+  "../../signers/webauthn/lib/openzeppelin-contracts": {
+    "rev": "dbb6104ce834628e473d2173bbc9d47f81a9eec3"
+  },
+  "../../policies/signature-caller/lib/kernel_v3": {
+    "rev": "379417c7d4932537ec0781fe83d97239244bd11a"
+  },
+  "signers/webauthn/lib/kernel": {
+    "rev": "10c0997d71bc54383d83dfacd68baa9f21cbbfb0"
+  },
+  "../../actions/recovery/lib/forge-std": {
+    "rev": "6bce1540c7a5d1c40eec032a1ae16f0e01f82b92"
+  },
+  "hooks/caller/lib/kernel": {
+    "rev": "03f7f5cf5871cda0070e4223f196f5b577f6cde2"
+  },
+  "../../policies/sudo/lib/forge-std": {
+    "rev": "bb4ceea94d6f10eeb5b41dc2391c6c8bf8e734ef"
+  },
+  "../../policies/ratelimit/lib/forge-std": {
+    "rev": "bb4ceea94d6f10eeb5b41dc2391c6c8bf8e734ef"
+  },
+  "../../validators/erc1271/lib/solady": {
+    "rev": "b609a9c79ce541c2beca7a7d247665e7c93942a3"
+  },
+  "signers/anysigner/lib/forge-std": {
+    "rev": "e4aef94c1768803a16fe19f7ce8b65defd027cfd"
+  },
+  "signers/webauthn/lib/forge-std": {
+    "rev": "bb4ceea94d6f10eeb5b41dc2391c6c8bf8e734ef"
+  },
+  "../spendlingLimits/lib/solady": {
+    "rev": "183a5c9cc3ca982492ae5fcca9e7ed6668ddb6ac"
+  },
+  "../../policies/call-policy/lib/kernel_v3": {
+    "rev": "379417c7d4932537ec0781fe83d97239244bd11a"
+  },
+  "../../validators/webauthn/lib/openzeppelin-contracts": {
+    "rev": "0a5fba7a7ed726698477c7772be5d17afe69f118"
+  },
+  "../../validators/webauthn/lib/p256-verifier": {
+    "rev": "e210c5e3f7f8a3955f6a1b172692036b49f2c36a"
+  },
+  "hooks/spendlingLimits/lib/solady": {
+    "rev": "183a5c9cc3ca982492ae5fcca9e7ed6668ddb6ac"
+  },
+  "validators/erc1271/lib/safe-smart-account": {
+    "rev": "bf943f80fec5ac647159d26161446ac5d716a294"
+  },
+  "../../validators/erc1271/lib/kernel": {
+    "rev": "cd697c7e21715d015e0643af22310a99aa17433b"
+  },
+  "../../validators/erc1271/lib/forge-std": {
+    "rev": "77041d2ce690e692d6e03cc812b57d1ddaa4d505"
+  },
+  "validators/webauthn/lib/forge-std": {
+    "rev": "e4aef94c1768803a16fe19f7ce8b65defd027cfd"
+  },
+  "validators/webauthn/lib/FreshCryptoLib": {
+    "rev": "76f3f135b7b27d2aa519f265b56bfc49a2573ab5"
+  },
+  "policies/sudo/lib/forge-std": {
+    "rev": "bb4ceea94d6f10eeb5b41dc2391c6c8bf8e734ef"
+  },
+  "signers/webauthn/lib/openzeppelin-contracts": {
+    "rev": "dbb6104ce834628e473d2173bbc9d47f81a9eec3"
+  },
+  "../spendlingLimits/lib/kernel": {
+    "rev": "51e935d24e5e4a74996fe566e91faddb034aac75"
+  },
+  "../../lib/safe-smart-account": {
+    "rev": "bf943f80fec5ac647159d26161446ac5d716a294"
+  },
+  "../../signers/ecdsa/lib/forge-std": {
+    "rev": "e4aef94c1768803a16fe19f7ce8b65defd027cfd"
+  },
+  "policies/timestamp/lib/forge-std": {
+    "rev": "bb4ceea94d6f10eeb5b41dc2391c6c8bf8e734ef"
+  },
+  "policies/ratelimit/lib/kernel_v3": {
+    "rev": "379417c7d4932537ec0781fe83d97239244bd11a"
+  },
+  "policies/ratelimit/lib/forge-std": {
+    "rev": "bb4ceea94d6f10eeb5b41dc2391c6c8bf8e734ef"
+  },
+  "../../signers/anysigner/lib/kernel_v3": {
+    "rev": "379417c7d4932537ec0781fe83d97239244bd11a"
+  },
+  "validators/erc1271/lib/forge-std": {
+    "rev": "77041d2ce690e692d6e03cc812b57d1ddaa4d505"
+  },
+  "../../signers/webauthn/lib/forge-std": {
+    "rev": "bb4ceea94d6f10eeb5b41dc2391c6c8bf8e734ef"
+  },
+  "hooks/caller/lib/forge-std": {
+    "rev": "6bce1540c7a5d1c40eec032a1ae16f0e01f82b92"
+  },
+  "validators/webauthn/lib/p256-verifier": {
+    "rev": "e210c5e3f7f8a3955f6a1b172692036b49f2c36a"
+  },
+  "signers/ecdsa/lib/forge-std": {
+    "rev": "e4aef94c1768803a16fe19f7ce8b65defd027cfd"
+  },
+  "lib/kernel": {
+    "tag": {
+      "name": "v3.1",
+      "rev": "03f7f5cf5871cda0070e4223f196f5b577f6cde2"
+    }
+  }
+}

@@ -4,9 +4,8 @@ out = "out"
 libs = ["lib", "dependencies"]
 bytecode_hash = "none"
 cbor_metadata = false
-optimize = true
+optimizer = true
 via-ir = true
-runs = 1000
 
 [profile.deploy]
 via-ir = true
