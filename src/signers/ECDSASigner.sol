@@ -1,8 +1,9 @@
 pragma solidity ^0.8.0;
 
 import {ECDSA} from "solady/utils/ECDSA.sol";
-import {ISigner, IStatelessValidator, IStatelessValidatorWithSender} from "src/interfaces/IERC7579Modules.sol";
+import {IModule, ISigner, IStatelessValidator, IStatelessValidatorWithSender} from "src/interfaces/IERC7579Modules.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
+import {SignerBase} from "src/base/SignerBase.sol";
 import {
     SIG_VALIDATION_SUCCESS_UINT,
     SIG_VALIDATION_FAILED_UINT,
@@ -17,12 +18,12 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
     mapping(address => uint256) public usedIds;
     mapping(bytes32 id => mapping(address wallet => address)) public signer;
 
-    function isModuleType(uint256 typeID) external pure override returns (bool) {
+    function isModuleType(uint256 typeID) external pure override(IModule, SignerBase) returns (bool) {
         return typeID == MODULE_TYPE_SIGNER || typeID == MODULE_TYPE_STATELESS_VALIDATOR
             || typeID == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
     }
 
-    function isInitialized(address wallet) external view override returns (bool) {
+    function isInitialized(address wallet) external view override(IModule, SignerBase) returns (bool) {
         return usedIds[wallet] > 0;
     }
 
@@ -58,13 +59,13 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
         return _verifySignature(hash, sig, owner) ? ERC1271_MAGICVALUE : ERC1271_INVALID;
     }
 
-    function _signerOninstall(bytes32 id, bytes calldata _data) internal {
+    function _signerOninstall(bytes32 id, bytes calldata _data) internal override {
         require(signer[id][msg.sender] == address(0));
         usedIds[msg.sender]++;
         signer[id][msg.sender] = address(bytes20(_data[0:20]));
     }
 
-    function _signerOnUninstall(bytes32 id, bytes calldata) internal {
+    function _signerOnUninstall(bytes32 id, bytes calldata) internal override {
         require(signer[id][msg.sender] != address(0));
         delete signer[id][msg.sender];
         usedIds[msg.sender]--;
