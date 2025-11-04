@@ -13,7 +13,7 @@ import {
     ERC1271_INVALID
 } from "src/types/Constants.sol";
 
-contract ECDSASigner is ISigner, IStatelessValidator, IStatelessValidatorWithSender {
+contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWithSender {
     mapping(address => uint256) public usedIds;
     mapping(bytes32 id => mapping(address wallet => address)) public signer;
 
@@ -56,18 +56,6 @@ contract ECDSASigner is ISigner, IStatelessValidator, IStatelessValidatorWithSen
     {
         address owner = signer[id][msg.sender];
         return _verifySignature(hash, sig, owner) ? ERC1271_MAGICVALUE : ERC1271_INVALID;
-    }
-
-    function onInstall(bytes calldata data) external payable {
-        bytes32 id = bytes32(data[0:32]);
-        bytes calldata _data = data[32:];
-        _signerOninstall(id, _data);
-    }
-
-    function onUninstall(bytes calldata data) external payable {
-        bytes32 id = bytes32(data[0:32]);
-        bytes calldata _data = data[32:];
-        _signerOnUninstall(id, _data);
     }
 
     function _signerOninstall(bytes32 id, bytes calldata _data) internal {

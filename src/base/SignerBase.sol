@@ -17,7 +17,7 @@ abstract contract SignerBase is ISigner {
         _signerOnUninstall(id, _data);
     }
 
-    function isModuleType(uint256 id) external pure returns (bool) {
+    function isModuleType(uint256 id) external pure virtual returns (bool) {
         return id == 6;
     }
 

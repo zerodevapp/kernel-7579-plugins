@@ -105,7 +105,6 @@ contract WebAuthnSigner is SignerBase {
         if (isValid) {
             return SIG_VALIDATION_SUCCESS_UINT;
         }
-
         return SIG_VALIDATION_FAILED_UINT;
     }
     /**
