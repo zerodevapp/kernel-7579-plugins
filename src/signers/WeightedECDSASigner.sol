@@ -94,7 +94,81 @@ contract WeightedECDSASigner is EIP712, SignerBase {
         override
         returns (uint256)
     {
-        WeightedECDSASignerStorage storage strg = weightedStorage[id][msg.sender];
+        return _validateUserOpSignature(id, userOp, userOpHash, userOp.signature, msg.sender);
+    }
+
+    function checkSignature(bytes32 id, address, bytes32 hash, bytes calldata sig)
+        external
+        view
+        override
+        returns (bytes4)
+    {
+        return _validateSignature(id, hash, sig, msg.sender);
+    }
+
+    // ==================== Stateless Validator Functions ====================
+
+    /**
+     * @notice Validates a user operation (stateless validator mode)
+     * @dev Called when module is used as a stateless validator (not installed on account)
+     * @param userOp The user operation to validate
+     * @param userOpHash The hash of the user operation
+     * @return validationData 0 for valid signature, 1 for invalid
+     */
+    function validateUserOp(PackedUserOperation calldata userOp, bytes32 userOpHash)
+        external
+        payable
+        returns (uint256)
+    {
+        // Extract id from signature: first 32 bytes
+        if (userOp.signature.length < 32) {
+            return SIG_VALIDATION_FAILED_UINT;
+        }
+
+        bytes32 id = bytes32(userOp.signature[0:32]);
+        bytes calldata actualSignature = userOp.signature[32:];
+
+        return _validateUserOpSignature(id, userOp, userOpHash, actualSignature, userOp.sender);
+    }
+
+    /**
+     * @notice Validates a signature with sender context (stateless validator mode)
+     * @dev Called for ERC-1271 validation when used as stateless validator
+     * @param sender The address that initiated the signature check
+     * @param hash The hash to validate
+     * @param data Signature data (format: [id(32)][signatures...])
+     * @return Magic value if valid, 0 otherwise
+     */
+    function isValidSignatureWithSender(address sender, bytes32 hash, bytes calldata data)
+        external
+        view
+        returns (bytes4)
+    {
+        // Extract id from data: first 32 bytes
+        if (data.length < 32) {
+            return ERC1271_INVALID;
+        }
+
+        bytes32 id = bytes32(data[0:32]);
+        bytes calldata sig = data[32:];
+
+        return _validateSignature(id, hash, sig, sender);
+    }
+
+    // ==================== Internal Shared Logic ====================
+
+    /**
+     * @notice Internal function to validate user operation signatures
+     * @dev Shared logic for both installed and stateless validator modes
+     */
+    function _validateUserOpSignature(
+        bytes32 id,
+        PackedUserOperation calldata userOp,
+        bytes32 userOpHash,
+        bytes calldata sig,
+        address account
+    ) internal returns (uint256) {
+        WeightedECDSASignerStorage storage strg = weightedStorage[id][account];
         if (strg.threshold == 0) {
             return SIG_VALIDATION_FAILED_UINT;
         }
@@ -112,7 +186,6 @@ contract WeightedECDSASigner is EIP712, SignerBase {
             )
         );
 
-        bytes calldata sig = userOp.signature;
         uint256 sigCount = sig.length / 65;
         require(sigCount > 0, "No sig");
 
@@ -130,7 +203,7 @@ contract WeightedECDSASigner is EIP712, SignerBase {
             require(signer > lastSigner, "Signers not sorted");
             lastSigner = signer;
 
-            uint24 guardianWeight = guardian[signer][id][msg.sender].weight;
+            uint24 guardianWeight = guardian[signer][id][account].weight;
             if (guardianWeight > 0) {
                 totalWeight += guardianWeight;
                 if (totalWeight >= threshold) {
@@ -142,7 +215,7 @@ contract WeightedECDSASigner is EIP712, SignerBase {
         // Last signature verifies userOpHash (exempt from ordering requirement)
         // NOTE: use this with ep > 0.7 only, for ep <= 0.7, need to use toEthSignedMessageHash
         signer = ECDSA.tryRecoverCalldata(userOpHash, sig[sig.length - 65:]);
-        uint24 lastWeight = guardian[signer][id][msg.sender].weight;
+        uint24 lastWeight = guardian[signer][id][account].weight;
         if (lastWeight > 0) {
             totalWeight += lastWeight;
             if (totalWeight >= threshold) {
@@ -153,13 +226,16 @@ contract WeightedECDSASigner is EIP712, SignerBase {
         return SIG_VALIDATION_FAILED_UINT;
     }
 
-    function checkSignature(bytes32 id, address, bytes32 hash, bytes calldata sig)
-        external
+    /**
+     * @notice Internal function to validate ERC-1271 signatures
+     * @dev Shared logic for both installed and stateless validator modes
+     */
+    function _validateSignature(bytes32 id, bytes32 hash, bytes calldata sig, address account)
+        internal
         view
-        override
         returns (bytes4)
     {
-        WeightedECDSASignerStorage storage strg = weightedStorage[id][msg.sender];
+        WeightedECDSASignerStorage storage strg = weightedStorage[id][account];
         if (strg.threshold == 0) {
             return ERC1271_INVALID;
         }
@@ -168,9 +244,11 @@ contract WeightedECDSASigner is EIP712, SignerBase {
         if (sigCount == 0) {
             return ERC1271_INVALID;
         }
+
         uint256 totalWeight = 0;
         address signer;
         address lastSigner = address(0);
+
         for (uint256 i = 0; i < sigCount; i++) {
             signer = ECDSA.tryRecoverCalldata(hash, sig[i * 65:(i + 1) * 65]);
 
@@ -180,11 +258,12 @@ contract WeightedECDSASigner is EIP712, SignerBase {
             }
             lastSigner = signer;
 
-            totalWeight += guardian[signer][id][msg.sender].weight;
+            totalWeight += guardian[signer][id][account].weight;
             if (totalWeight >= strg.threshold) {
                 return ERC1271_MAGICVALUE;
             }
         }
+
         return ERC1271_INVALID;
     }
 }
