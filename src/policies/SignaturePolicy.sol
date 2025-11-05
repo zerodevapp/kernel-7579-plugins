@@ -1,6 +1,8 @@
 pragma solidity ^0.8.0;
 
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
+import {IStatelessValidatorWithSender, IModule} from "src/interfaces/IERC7579Modules.sol";
+import {PolicyBase} from "src/base/PolicyBase.sol";
 
 enum Status {
     NA,
@@ -18,49 +20,61 @@ import {
     ERC1271_INVALID
 } from "src/types/Constants.sol";
 
-contract SignaturePolicy {
+contract SignaturePolicy is PolicyBase, IStatelessValidatorWithSender {
     mapping(address => uint256) public usedIds;
     mapping(bytes32 id => mapping(address => Status)) public status;
     mapping(bytes32 id => mapping(address caller => mapping(address wallet => bool))) public allowedCaller;
 
-    function onInstall(bytes calldata data) external payable {
-        bytes32 id = bytes32(data[0:32]);
-        bytes calldata _data = data[32:];
-        _policyOninstall(id, _data);
+    function isModuleType(uint256 typeID) external pure override(IModule,PolicyBase) returns (bool) {
+        return typeID == MODULE_TYPE_POLICY
+            || typeID == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
     }
 
-    function onUninstall(bytes calldata data) external payable {
-        bytes32 id = bytes32(data[0:32]);
-        bytes calldata _data = data[32:];
-        _policyOnUninstall(id, _data);
-    }
-
-    function isModuleType(uint256 typeID) external pure returns (bool) {
-        return typeID == MODULE_TYPE_POLICY || typeID == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
-    }
-
-    function isInitialized(address wallet) external view returns (bool) {
+    function isInitialized(address wallet) external view override(IModule,PolicyBase) returns (bool) {
         return usedIds[wallet] > 0;
     }
 
-    function checkUserOpPolicy(bytes32 id, PackedUserOperation calldata userOp) external payable returns (uint256) {
-        require(status[id][msg.sender] == Status.Live);
-        return 0; // always pass
+    function checkUserOpPolicy(bytes32 id, PackedUserOperation calldata userOp) external payable override returns (uint256) {
+        return _validateUserOpPolicy(id, msg.sender);
     }
 
     function checkSignaturePolicy(bytes32 id, address sender, bytes32 hash, bytes calldata sig)
         external
         view
+        override
         returns (uint256)
     {
-        require(status[id][msg.sender] == Status.Live);
-        if (allowedCaller[id][sender][msg.sender]) {
+        return _validateSignaturePolicy(id, sender, msg.sender);
+    }
+
+    // ==================== Internal Shared Logic ====================
+
+    /**
+     * @notice Internal function to validate user operation policy
+     * @dev Shared logic for both installed and stateless validator modes
+     */
+    function _validateUserOpPolicy(bytes32 id, address account) internal view returns (uint256) {
+        if (status[id][account] != Status.Live) {
+            return SIG_VALIDATION_FAILED_UINT;
+        }
+        return SIG_VALIDATION_SUCCESS_UINT; // always pass if policy is live
+    }
+
+    /**
+     * @notice Internal function to validate signature policy
+     * @dev Shared logic for both installed and stateless validator modes
+     */
+    function _validateSignaturePolicy(bytes32 id, address sender, address account) internal view returns (uint256) {
+        if (status[id][account] != Status.Live) {
+            return 1;
+        }
+        if (allowedCaller[id][sender][account]) {
             return 0;
         }
         return 1;
     }
 
-    function _policyOninstall(bytes32 id, bytes calldata _data) internal {
+    function _policyOninstall(bytes32 id, bytes calldata _data) internal override {
         require(status[id][msg.sender] == Status.NA);
         address[] memory callers = abi.decode(_data, (address[]));
         for (uint256 i = 0; i < callers.length; i++) {
@@ -70,7 +84,7 @@ contract SignaturePolicy {
         usedIds[msg.sender]++;
     }
 
-    function _policyOnUninstall(bytes32 id, bytes calldata _data) internal {
+    function _policyOnUninstall(bytes32 id, bytes calldata _data) internal override {
         require(status[id][msg.sender] == Status.Live);
         status[id][msg.sender] = Status.Deprecated;
         usedIds[msg.sender]--;
