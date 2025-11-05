@@ -4,16 +4,24 @@ pragma solidity ^0.8.0;
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 import {IAccountExecute} from "account-abstraction/interfaces/IAccountExecute.sol";
 import {IERC7579Execution} from "openzeppelin-contracts/contracts/interfaces/draft-IERC7579.sol";
-import {IModule} from "src/interfaces/IERC7579Modules.sol";
+import {IModule, IStatelessValidator, IStatelessValidatorWithSender} from "src/interfaces/IERC7579Modules.sol";
 import {PolicyBase} from "src/base/PolicyBase.sol";
+import {
+    MODULE_TYPE_POLICY,
+    MODULE_TYPE_STATELESS_VALIDATOR,
+    MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER,
+    SIG_VALIDATION_SUCCESS_UINT,
+    SIG_VALIDATION_FAILED_UINT,
+    ERC1271_MAGICVALUE,
+    ERC1271_INVALID
+} from "src/types/Constants.sol";
 
 /**
  * @title TimelockPolicy
  * @notice A policy module that enforces time-delayed execution of transactions for enhanced security
  * @dev Users must first create a proposal, wait for the timelock delay, then execute
  */
-contract TimelockPolicy is PolicyBase {
-
+contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorWithSender {
     enum ProposalStatus {
         None, // Proposal doesn't exist
         Pending, // Proposal created, waiting for timelock
@@ -44,11 +52,7 @@ contract TimelockPolicy is PolicyBase {
     mapping(address => uint256) public usedIds;
 
     event ProposalCreated(
-        address indexed wallet,
-        bytes32 indexed id,
-        bytes32 indexed proposalHash,
-        uint256 validAfter,
-        uint256 validUntil
+        address indexed wallet, bytes32 indexed id, bytes32 indexed proposalHash, uint256 validAfter, uint256 validUntil
     );
 
     event ProposalExecuted(address indexed wallet, bytes32 indexed id, bytes32 indexed proposalHash);
@@ -92,7 +96,6 @@ contract TimelockPolicy is PolicyBase {
      * @notice Uninstall the timelock policy
      */
     function _policyOnUninstall(bytes32 id, bytes calldata) internal override {
-
         if (!timelockConfig[id][msg.sender].initialized) {
             revert IModule.NotInitialized(msg.sender);
         }
@@ -104,8 +107,17 @@ contract TimelockPolicy is PolicyBase {
     /**
      * @notice Check if the policy is initialized for a wallet
      */
-    function isInitialized(address wallet) public view override returns (bool) {
+    function isInitialized(address wallet) public view override(IModule, PolicyBase) returns (bool) {
         return usedIds[wallet] > 0;
+    }
+
+    /**
+     * @notice Check if this module is a specific type
+     * @dev Supports policy and stateless validator types
+     */
+    function isModuleType(uint256 moduleTypeId) external pure override(IModule, PolicyBase) returns (bool) {
+        return moduleTypeId == MODULE_TYPE_POLICY || moduleTypeId == MODULE_TYPE_STATELESS_VALIDATOR
+            || moduleTypeId == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
     }
 
     /**
@@ -184,37 +196,29 @@ contract TimelockPolicy is PolicyBase {
         override
         returns (uint256)
     {
-        TimelockConfig storage config = timelockConfig[id][msg.sender];
-        if (!config.initialized) return 1;
-
-        // Check if this is a proposal creation request
-        // Criteria: calldata is a no-op AND signature has proposal data (length >= 65)
-        if (_isNoOpCalldata(userOp.callData) && userOp.signature.length >= 65) {
-            // This is a proposal creation request
-            return _handleProposalCreation(id, userOp, config);
-        }
-
-        // Otherwise, this is a proposal execution request
-        return _handleProposalExecution(id, userOp);
+        return _validateUserOpPolicy(id, userOp, userOp.signature, msg.sender);
     }
 
     /**
      * @notice Handle proposal creation from userOp
      * @dev Signature format: [callDataLength(32)][callData][nonce(32)][remaining sig data]
      */
-    function _handleProposalCreation(bytes32 id, PackedUserOperation calldata userOp, TimelockConfig storage config)
-        internal
-        returns (uint256)
-    {
+    function _handleProposalCreationInternal(
+        bytes32 id,
+        PackedUserOperation calldata userOp,
+        TimelockConfig storage config,
+        bytes calldata sig,
+        address account
+    ) internal returns (uint256) {
         // Decode proposal data from signature
         // Format: [callDataLength(32 bytes)][callData][nonce(32 bytes)][...]
-        uint256 callDataLength = uint256(bytes32(userOp.signature[0:32]));
+        uint256 callDataLength = uint256(bytes32(sig[0:32]));
 
         // Validate signature has enough data
-        if (userOp.signature.length < 64 + callDataLength) return 1;
+        if (sig.length < 64 + callDataLength) return SIG_VALIDATION_FAILED_UINT;
 
-        bytes calldata proposalCallData = userOp.signature[32:32 + callDataLength];
-        uint256 proposalNonce = uint256(bytes32(userOp.signature[32 + callDataLength:64 + callDataLength]));
+        bytes calldata proposalCallData = sig[32:32 + callDataLength];
+        uint256 proposalNonce = uint256(bytes32(sig[32 + callDataLength:64 + callDataLength]));
 
         // Calculate proposal timing
         uint48 validAfter = uint48(block.timestamp) + config.delay;
@@ -224,36 +228,39 @@ contract TimelockPolicy is PolicyBase {
         bytes32 userOpKey = keccak256(abi.encode(userOp.sender, keccak256(proposalCallData), proposalNonce));
 
         // Check proposal doesn't already exist
-        if (proposals[userOpKey][id][msg.sender].status != ProposalStatus.None) {
-            return 1; // Proposal already exists
+        if (proposals[userOpKey][id][account].status != ProposalStatus.None) {
+            return SIG_VALIDATION_FAILED_UINT; // Proposal already exists
         }
 
         // Create proposal
-        proposals[userOpKey][id][msg.sender] =
+        proposals[userOpKey][id][account] =
             Proposal({status: ProposalStatus.Pending, validAfter: validAfter, validUntil: validUntil});
 
-        emit ProposalCreated(msg.sender, id, userOpKey, validAfter, validUntil);
+        emit ProposalCreated(account, id, userOpKey, validAfter, validUntil);
 
         // Return failure to prevent execution (this was just proposal creation)
-        return 1;
+        return SIG_VALIDATION_FAILED_UINT;
     }
 
     /**
      * @notice Handle proposal execution from userOp
      */
-    function _handleProposalExecution(bytes32 id, PackedUserOperation calldata userOp) internal returns (uint256) {
+    function _handleProposalExecutionInternal(bytes32 id, PackedUserOperation calldata userOp, address account)
+        internal
+        returns (uint256)
+    {
         // Create userOp key to look up the proposal
         bytes32 userOpKey = keccak256(abi.encode(userOp.sender, keccak256(userOp.callData), userOp.nonce));
 
-        Proposal storage proposal = proposals[userOpKey][id][msg.sender];
+        Proposal storage proposal = proposals[userOpKey][id][account];
 
         // Check proposal exists and is pending
-        if (proposal.status != ProposalStatus.Pending) return 1;
+        if (proposal.status != ProposalStatus.Pending) return SIG_VALIDATION_FAILED_UINT;
 
         // Mark as executed
         proposal.status = ProposalStatus.Executed;
 
-        emit ProposalExecuted(msg.sender, id, userOpKey);
+        emit ProposalExecuted(account, id, userOpKey);
 
         // Return validAfter and validUntil for EntryPoint to validate timing
         return _packValidationData(proposal.validAfter, proposal.validUntil);
@@ -377,18 +384,77 @@ contract TimelockPolicy is PolicyBase {
      * @param id The policy ID
      * @return validationData 0 if valid, 1 if invalid
      */
-    function checkSignaturePolicy(bytes32 id, address, bytes32, bytes calldata)
+    function checkSignaturePolicy(bytes32 id, address, bytes32 hash, bytes calldata sig)
         external
         view
         override
         returns (uint256)
     {
-        TimelockConfig storage config = timelockConfig[id][msg.sender];
-        if (!config.initialized) return 1;
+        bytes4 result = _validateSignaturePolicy(id, msg.sender, hash, sig);
+        return result == ERC1271_MAGICVALUE ? 0 : 1;
+    }
+
+    function validateSignatureWithData(bytes32, bytes calldata, bytes calldata data)
+        external
+        pure
+        override(IStatelessValidator)
+        returns (bool)
+    {
+        (uint48 delay, uint48 expirationPeriod) = abi.decode(data, (uint48, uint48));
+        return delay != 0 && expirationPeriod != 0;
+    }
+
+    function validateSignatureWithDataWithSender(address, bytes32, bytes calldata, bytes calldata data)
+        external
+        pure
+        override(IStatelessValidatorWithSender)
+        returns (bool)
+    {
+        (uint48 delay, uint48 expirationPeriod) = abi.decode(data, (uint48, uint48));
+        return delay != 0 && expirationPeriod != 0;
+    }
+
+    // ==================== Internal Shared Logic ====================
+
+    /**
+     * @notice Internal function to validate user operation policy
+     * @dev Shared logic for both installed and stateless validator modes
+     */
+    function _validateUserOpPolicy(
+        bytes32 id,
+        PackedUserOperation calldata userOp,
+        bytes calldata sig,
+        address account
+    ) internal returns (uint256) {
+        TimelockConfig storage config = timelockConfig[id][account];
+        if (!config.initialized) return SIG_VALIDATION_FAILED_UINT;
+
+        // Check if this is a proposal creation request
+        // Criteria: calldata is a no-op AND signature has proposal data (length >= 65)
+        if (_isNoOpCalldata(userOp.callData) && sig.length >= 65) {
+            // This is a proposal creation request
+            return _handleProposalCreationInternal(id, userOp, config, sig, account);
+        }
+
+        // Otherwise, this is a proposal execution request
+        return _handleProposalExecutionInternal(id, userOp, account);
+    }
+
+    /**
+     * @notice Internal function to validate signature policy
+     * @dev Shared logic for both installed and stateless validator modes
+     */
+    function _validateSignaturePolicy(bytes32 id, address account, bytes32 hash, bytes calldata sig)
+        internal
+        view
+        returns (bytes4)
+    {
+        TimelockConfig storage config = timelockConfig[id][account];
+        if (!config.initialized) return ERC1271_INVALID;
 
         // For signature validation, we're more permissive
         // Timelock is primarily for userOp execution
-        return 0;
+        return ERC1271_MAGICVALUE;
     }
 
     /**
@@ -419,11 +485,7 @@ contract TimelockPolicy is PolicyBase {
      * @param nonce The nonce
      * @return The user operation key
      */
-    function computeUserOpKey(address account, bytes calldata callData, uint256 nonce)
-        external
-        pure
-        returns (bytes32)
-    {
+    function computeUserOpKey(address account, bytes calldata callData, uint256 nonce) external pure returns (bytes32) {
         return keccak256(abi.encode(account, keccak256(callData), nonce));
     }
 }

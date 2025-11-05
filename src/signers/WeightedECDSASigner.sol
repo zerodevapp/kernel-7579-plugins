@@ -17,6 +17,7 @@ import {
     MODULE_TYPE_STATELESS_VALIDATOR,
     MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER
 } from "src/types/Constants.sol";
+import {IModule, IStatelessValidator, IStatelessValidatorWithSender} from "src/interfaces/IERC7579Modules.sol";
 
 struct WeightedECDSASignerStorage {
     uint24 totalWeight;
@@ -29,7 +30,7 @@ struct GuardianStorage {
     address nextGuardian;
 }
 
-contract WeightedECDSASigner is EIP712, SignerBase {
+contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatelessValidatorWithSender {
     // EIP712 typehash for the Proposal struct
     bytes32 private constant PROPOSAL_TYPEHASH =
         keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce)");
@@ -75,12 +76,12 @@ contract WeightedECDSASigner is EIP712, SignerBase {
         delete weightedStorage[id][msg.sender];
     }
 
-    function isModuleType(uint256 moduleTypeId) external pure override returns (bool) {
+    function isModuleType(uint256 moduleTypeId) external pure override(IModule, SignerBase) returns (bool) {
         return moduleTypeId == MODULE_TYPE_SIGNER || moduleTypeId == MODULE_TYPE_STATELESS_VALIDATOR
             || moduleTypeId == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
     }
 
-    function isInitialized(address smartAccount) external view override returns (bool) {
+    function isInitialized(address smartAccount) external view override(IModule, SignerBase) returns (bool) {
         return _isInitialized(bytes32(0), smartAccount);
     }
 
@@ -106,53 +107,26 @@ contract WeightedECDSASigner is EIP712, SignerBase {
         return _validateSignature(id, hash, sig, msg.sender);
     }
 
-    // ==================== Stateless Validator Functions ====================
-
-    /**
-     * @notice Validates a user operation (stateless validator mode)
-     * @dev Called when module is used as a stateless validator (not installed on account)
-     * @param userOp The user operation to validate
-     * @param userOpHash The hash of the user operation
-     * @return validationData 0 for valid signature, 1 for invalid
-     */
-    function validateUserOp(PackedUserOperation calldata userOp, bytes32 userOpHash)
-        external
-        payable
-        returns (uint256)
-    {
-        // Extract id from signature: first 32 bytes
-        if (userOp.signature.length < 32) {
-            return SIG_VALIDATION_FAILED_UINT;
-        }
-
-        bytes32 id = bytes32(userOp.signature[0:32]);
-        bytes calldata actualSignature = userOp.signature[32:];
-
-        return _validateUserOpSignature(id, userOp, userOpHash, actualSignature, userOp.sender);
-    }
-
-    /**
-     * @notice Validates a signature with sender context (stateless validator mode)
-     * @dev Called for ERC-1271 validation when used as stateless validator
-     * @param sender The address that initiated the signature check
-     * @param hash The hash to validate
-     * @param data Signature data (format: [id(32)][signatures...])
-     * @return Magic value if valid, 0 otherwise
-     */
-    function isValidSignatureWithSender(address sender, bytes32 hash, bytes calldata data)
+    function validateSignatureWithData(bytes32 hash, bytes calldata signature, bytes calldata data)
         external
         view
-        returns (bytes4)
+        override(IStatelessValidator)
+        returns (bool)
     {
-        // Extract id from data: first 32 bytes
-        if (data.length < 32) {
-            return ERC1271_INVALID;
-        }
+        (address[] memory guardians, uint24[] memory weights, uint24 threshold) =
+            abi.decode(data, (address[], uint24[], uint24));
+        return _validateStatelessSignature(hash, signature, guardians, weights, threshold);
+    }
 
-        bytes32 id = bytes32(data[0:32]);
-        bytes calldata sig = data[32:];
-
-        return _validateSignature(id, hash, sig, sender);
+    function validateSignatureWithDataWithSender(
+        address,
+        bytes32 hash,
+        bytes calldata signature,
+        bytes calldata data
+    ) external view override(IStatelessValidatorWithSender) returns (bool) {
+        (address[] memory guardians, uint24[] memory weights, uint24 threshold) =
+            abi.decode(data, (address[], uint24[], uint24));
+        return _validateStatelessSignature(hash, signature, guardians, weights, threshold);
     }
 
     // ==================== Internal Shared Logic ====================
@@ -185,6 +159,10 @@ contract WeightedECDSASigner is EIP712, SignerBase {
                 )
             )
         );
+
+        if (sig.length % 65 != 0) {
+            return SIG_VALIDATION_FAILED_UINT;
+        }
 
         uint256 sigCount = sig.length / 65;
         require(sigCount > 0, "No sig");
@@ -265,5 +243,58 @@ contract WeightedECDSASigner is EIP712, SignerBase {
         }
 
         return ERC1271_INVALID;
+    }
+
+    function _validateStatelessSignature(
+        bytes32 hash,
+        bytes calldata sig,
+        address[] memory guardians,
+        uint24[] memory weights,
+        uint24 threshold
+    ) internal view returns (bool) {
+        if (threshold == 0 || guardians.length != weights.length) {
+            return false;
+        }
+
+        uint256 sigCount = sig.length / 65;
+        if (sigCount == 0) {
+            return false;
+        }
+
+        uint256 totalWeight;
+        address signer;
+        address lastSigner = address(0);
+
+        for (uint256 i = 0; i < sigCount; i++) {
+            signer = ECDSA.tryRecoverCalldata(hash, sig[i * 65:(i + 1) * 65]);
+
+            if (signer <= lastSigner) {
+                return false;
+            }
+            lastSigner = signer;
+
+            uint24 guardianWeight = _memoryGuardianWeight(signer, guardians, weights);
+            if (guardianWeight > 0) {
+                totalWeight += guardianWeight;
+                if (totalWeight >= threshold) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    function _memoryGuardianWeight(address signer, address[] memory guardians, uint24[] memory weights)
+        internal
+        pure
+        returns (uint24)
+    {
+        for (uint256 i = 0; i < guardians.length; i++) {
+            if (guardians[i] == signer) {
+                return weights[i];
+            }
+        }
+        return 0;
     }
 }
