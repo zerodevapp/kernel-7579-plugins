@@ -119,10 +119,17 @@ contract WeightedECDSASigner is EIP712, SignerBase {
         uint256 totalWeight = 0;
         uint256 threshold = strg.threshold;
         address signer;
+        address lastSigner = address(0);
 
         // Process all signatures except the last one (they sign proposalHash)
+        // Signers must be in strictly ascending order to prevent reuse
         for (uint256 i = 0; i < sigCount - 1; i++) {
             signer = ECDSA.tryRecoverCalldata(proposalHash, sig[i * 65:(i + 1) * 65]);
+
+            // Enforce sorted order to prevent signature reuse
+            require(signer > lastSigner, "Signers not sorted");
+            lastSigner = signer;
+
             uint24 guardianWeight = guardian[signer][id][msg.sender].weight;
             if (guardianWeight > 0) {
                 totalWeight += guardianWeight;
@@ -132,7 +139,7 @@ contract WeightedECDSASigner is EIP712, SignerBase {
             }
         }
 
-        // Last signature verifies userOpHash
+        // Last signature verifies userOpHash (exempt from ordering requirement)
         // NOTE: use this with ep > 0.7 only, for ep <= 0.7, need to use toEthSignedMessageHash
         signer = ECDSA.tryRecoverCalldata(userOpHash, sig[sig.length - 65:]);
         uint24 lastWeight = guardian[signer][id][msg.sender].weight;
@@ -163,8 +170,16 @@ contract WeightedECDSASigner is EIP712, SignerBase {
         }
         uint256 totalWeight = 0;
         address signer;
+        address lastSigner = address(0);
         for (uint256 i = 0; i < sigCount; i++) {
             signer = ECDSA.tryRecoverCalldata(hash, sig[i * 65:(i + 1) * 65]);
+
+            // Enforce sorted order to prevent signature reuse
+            if (signer <= lastSigner) {
+                return ERC1271_INVALID;
+            }
+            lastSigner = signer;
+
             totalWeight += guardian[signer][id][msg.sender].weight;
             if (totalWeight >= strg.threshold) {
                 return ERC1271_MAGICVALUE;
