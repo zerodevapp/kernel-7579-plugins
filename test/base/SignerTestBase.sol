@@ -30,15 +30,26 @@ abstract contract SignerTestBase is ModuleTestBase {
         assertTrue(result);
     }
 
-    function testSignerOnInstall() public payable {
+    function _afterInstallCheck(bytes32 id) internal virtual {
+        ISigner signerModule = ISigner(address(module));
+        bool initializedAfter = signerModule.isInitialized(WALLET);
+        assertEq(initializedAfter, true);
+    }
+
+    function _afterUninstallCheck(bytes32 id) internal virtual {
+        ISigner signerModule = ISigner(address(module));
+        bool initializedAfterUninstall = signerModule.isInitialized(WALLET);
+        assertEq(initializedAfterUninstall, false);
+    }
+
+    function testSignerOnInstall() public payable virtual {
         ISigner signerModule = ISigner(address(module));
         bool initializedBefore = signerModule.isInitialized(WALLET);
         assertEq(initializedBefore, false);
         vm.startPrank(WALLET);
         signerModule.onInstall(abi.encodePacked(signerId(), installData()));
         vm.stopPrank();
-        bool initializedAfter = signerModule.isInitialized(WALLET);
-        assertEq(initializedAfter, true);
+        _afterInstallCheck(signerId());
     }
 
     function testSignerOnInstallFailSameId() public payable {
@@ -50,26 +61,25 @@ abstract contract SignerTestBase is ModuleTestBase {
         vm.stopPrank();
     }
 
-    function testSignerOnInstallMultipleTimesSuccess() public payable {
+    function testSignerOnInstallMultipleTimesSuccess() public payable virtual {
         ISigner signerModule = ISigner(address(module));
         vm.startPrank(WALLET);
         signerModule.onInstall(abi.encodePacked(signerId(), installData()));
-        signerModule.onInstall(abi.encodePacked(keccak256(abi.encodePacked("SIGNER_ID_2")), installData()));
+        bytes32 signerId2 = keccak256(abi.encodePacked("SIGNER_ID_2"));
+        signerModule.onInstall(abi.encodePacked(signerId2, installData()));
         vm.stopPrank();
-        bool initializedAfter = signerModule.isInitialized(WALLET);
-        assertEq(initializedAfter, true);
+        _afterInstallCheck(signerId());
+        _afterInstallCheck(signerId2);
     }
 
-    function testSignerOnUninstall() public payable {
+    function testSignerOnUninstall() public payable virtual {
         ISigner signerModule = ISigner(address(module));
         vm.startPrank(WALLET);
         signerModule.onInstall(abi.encodePacked(signerId(), installData()));
-        bool initializedAfterInstall = signerModule.isInitialized(WALLET);
-        assertEq(initializedAfterInstall, true);
+        _afterInstallCheck(signerId());
 
         signerModule.onUninstall(abi.encodePacked(signerId(), installData()));
-        bool initializedAfterUninstall = signerModule.isInitialized(WALLET);
-        assertEq(initializedAfterUninstall, false);
+        _afterUninstallCheck(signerId());
         vm.stopPrank();
     }
 

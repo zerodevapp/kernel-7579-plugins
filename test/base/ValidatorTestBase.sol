@@ -27,6 +27,18 @@ abstract contract ValidatorTestBase is ModuleTestBase {
         assertTrue(result);
     }
 
+    function _afterInstallCheck() internal virtual {
+        IValidator validatorModule = IValidator(address(module));
+        bool initializedAfter = validatorModule.isInitialized(WALLET);
+        assertEq(initializedAfter, true);
+    }
+
+    function _afterUninstallCheck() internal virtual {
+        IValidator validatorModule = IValidator(address(module));
+        bool initializedAfterUninstall = validatorModule.isInitialized(WALLET);
+        assertEq(initializedAfterUninstall, false);
+    }
+
     function testValidatorOnInstall() public payable {
         IValidator validatorModule = IValidator(address(module));
         bool initializedBefore = validatorModule.isInitialized(WALLET);
@@ -34,8 +46,7 @@ abstract contract ValidatorTestBase is ModuleTestBase {
         vm.startPrank(WALLET);
         validatorModule.onInstall(installData());
         vm.stopPrank();
-        bool initializedAfter = validatorModule.isInitialized(WALLET);
-        assertEq(initializedAfter, true);
+        _afterInstallCheck();
     }
 
     function testValidatorOnInstallFailIfAlreadyInitialized() public payable {
@@ -51,12 +62,10 @@ abstract contract ValidatorTestBase is ModuleTestBase {
         IValidator validatorModule = IValidator(address(module));
         vm.startPrank(WALLET);
         validatorModule.onInstall(installData());
-        bool initializedAfterInstall = validatorModule.isInitialized(WALLET);
-        assertEq(initializedAfterInstall, true);
+        _afterInstallCheck();
 
         validatorModule.onUninstall(installData());
-        bool initializedAfterUninstall = validatorModule.isInitialized(WALLET);
-        assertEq(initializedAfterUninstall, false);
+        _afterUninstallCheck();
         vm.stopPrank();
     }
 
