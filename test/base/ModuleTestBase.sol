@@ -1,3 +1,5 @@
+pragma solidity ^0.8.0;
+
 import {Test} from "forge-std/Test.sol";
 import {IModule} from "src/interfaces/IERC7579Modules.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";

@@ -59,11 +59,9 @@ contract ECDSASignerTest is
     }
 
     function statelessValidationSignatureWithSender(
-        address,
         bytes32 hash,
         bool valid
     ) internal view virtual override returns (address, bytes memory) {
         return erc1271Signature(hash, valid);
     }
-
 }

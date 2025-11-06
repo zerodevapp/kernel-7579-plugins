@@ -84,7 +84,7 @@ abstract contract PolicyTestBase is ModuleTestBase {
         assertEq(validationResult, 0);
     }
 
-    function testPolicyAfterInstallCheckUserOpPolicyFail() public payable {
+    function testPolicyAfterInstallCheckUserOpPolicyFail() public payable virtual {
         IPolicy policyModule = IPolicy(address(module));
         vm.startPrank(WALLET);
         policyModule.onInstall(abi.encodePacked(policyId(), installData()));
