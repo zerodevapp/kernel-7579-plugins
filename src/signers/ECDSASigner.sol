@@ -74,6 +74,7 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
     function validateSignatureWithData(bytes32 hash, bytes calldata signature, bytes calldata data)
         external
         view
+        override(IStatelessValidator)
         returns (bool)
     {
         return _verifySignature(hash, signature, address(bytes20(data[0:20])));
@@ -82,6 +83,7 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
     function validateSignatureWithDataWithSender(address, bytes32 hash, bytes calldata signature, bytes calldata data)
         external
         view
+        override(IStatelessValidatorWithSender)
         returns (bool)
     {
         return _verifySignature(hash, signature, address(bytes20(data[0:20])));

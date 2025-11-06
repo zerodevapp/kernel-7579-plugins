@@ -26,8 +26,7 @@ contract SignaturePolicy is PolicyBase, IStatelessValidatorWithSender {
     mapping(bytes32 id => mapping(address caller => mapping(address wallet => bool))) public allowedCaller;
 
     function isModuleType(uint256 typeID) external pure override(IModule,PolicyBase) returns (bool) {
-        return typeID == MODULE_TYPE_POLICY
-            || typeID == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
+        return typeID == MODULE_TYPE_POLICY || typeID == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
     }
 
     function isInitialized(address wallet) external view override(IModule,PolicyBase) returns (bool) {
@@ -92,7 +91,8 @@ contract SignaturePolicy is PolicyBase, IStatelessValidatorWithSender {
 
     function validateSignatureWithDataWithSender(address sender, bytes32, bytes calldata, bytes calldata data)
         external
-        view
+        pure
+        override(IStatelessValidatorWithSender)
         returns (bool)
     {
         address[] memory callers = abi.decode(data, (address[]));
