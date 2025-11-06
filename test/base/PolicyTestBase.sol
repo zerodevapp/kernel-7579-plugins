@@ -27,6 +27,18 @@ abstract contract PolicyTestBase is ModuleTestBase {
         assertTrue(result);
     }
 
+    function _afterInstallCheck(bytes32 id) internal virtual {
+        IPolicy policyModule = IPolicy(address(module));
+        bool initializedAfter = policyModule.isInitialized(WALLET);
+        assertEq(initializedAfter, true);
+    }
+
+    function _afterUninstallCheck(bytes32 id) internal virtual {
+        IPolicy policyModule = IPolicy(address(module));
+        bool initializedAfterUninstall = policyModule.isInitialized(WALLET);
+        assertEq(initializedAfterUninstall, false);
+    }
+
     function testPolicyOnInstall() public payable {
         IPolicy policyModule = IPolicy(address(module));
         bool initializedBefore = policyModule.isInitialized(WALLET);
@@ -34,8 +46,7 @@ abstract contract PolicyTestBase is ModuleTestBase {
         vm.startPrank(WALLET);
         policyModule.onInstall(abi.encodePacked(policyId(), installData()));
         vm.stopPrank();
-        bool initializedAfter = policyModule.isInitialized(WALLET);
-        assertEq(initializedAfter, true);
+        _afterInstallCheck(policyId());
     }
 
     function testPolicyOnInstallFailSameId() public payable {
@@ -51,26 +62,25 @@ abstract contract PolicyTestBase is ModuleTestBase {
         IPolicy policyModule = IPolicy(address(module));
         vm.startPrank(WALLET);
         policyModule.onInstall(abi.encodePacked(policyId(), installData()));
-        policyModule.onInstall(abi.encodePacked(keccak256(abi.encodePacked("POLICY_ID_2")), installData()));
+        bytes32 policyId2 = keccak256(abi.encodePacked("POLICY_ID_2"));
+        policyModule.onInstall(abi.encodePacked(policyId2, installData()));
         vm.stopPrank();
-        bool initializedAfter = policyModule.isInitialized(WALLET);
-        assertEq(initializedAfter, true);
+        _afterInstallCheck(policyId());
+        _afterInstallCheck(policyId2);
     }
 
     function testPolicyOnUninstall() public payable {
         IPolicy policyModule = IPolicy(address(module));
         vm.startPrank(WALLET);
         policyModule.onInstall(abi.encodePacked(policyId(), installData()));
-        bool initializedAfterInstall = policyModule.isInitialized(WALLET);
-        assertEq(initializedAfterInstall, true);
+        _afterInstallCheck(policyId());
 
         policyModule.onUninstall(abi.encodePacked(policyId(), installData()));
-        bool initializedAfterUninstall = policyModule.isInitialized(WALLET);
-        assertEq(initializedAfterUninstall, false);
+        _afterUninstallCheck(policyId());
         vm.stopPrank();
     }
 
-    function testPolicyAfterInstallCheckUserOpPolicySuccess() public payable {
+    function testPolicyAfterInstallCheckUserOpPolicySuccess() public payable virtual {
         IPolicy policyModule = IPolicy(address(module));
         vm.startPrank(WALLET);
         policyModule.onInstall(abi.encodePacked(policyId(), installData()));
@@ -113,7 +123,7 @@ abstract contract PolicyTestBase is ModuleTestBase {
         assertEq(result, 0);
     }
 
-    function testPolicyCheckSignaturePolicyFail() public payable {
+    function testPolicyCheckSignaturePolicyFail() public payable virtual {
         IPolicy policyModule = IPolicy(address(module));
         vm.startPrank(WALLET);
         policyModule.onInstall(abi.encodePacked(policyId(), installData()));

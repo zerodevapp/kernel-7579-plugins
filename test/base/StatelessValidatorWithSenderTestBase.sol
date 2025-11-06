@@ -36,7 +36,7 @@ abstract contract StatelessValidatorWithSenderTestBase is ModuleTestBase {
         assertTrue(result);
     }
 
-    function testStatelessValidatorWithSenderFail() external {
+    function testStatelessValidatorWithSenderFail() external virtual {
         IStatelessValidatorWithSender validatorModule = IStatelessValidatorWithSender(address(module));
 
         bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
