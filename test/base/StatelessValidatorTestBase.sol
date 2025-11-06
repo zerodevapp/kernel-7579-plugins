@@ -14,7 +14,7 @@ abstract contract StatelessValidatorTestBase is ModuleTestBase {
         internal
         view
         virtual
-        returns (bytes memory);
+        returns (address, bytes memory);
     function testModuleTypeStatelessValidator() public view
     {
         IStatelessValidator validatorModule = IStatelessValidator(address(module));
@@ -26,7 +26,7 @@ abstract contract StatelessValidatorTestBase is ModuleTestBase {
         IStatelessValidator validatorModule = IStatelessValidator(address(module));
 
         bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
-        bytes memory sig = statelessValidationSignature(message, true);
+        (, bytes memory sig) = statelessValidationSignature(message, true);
 
         vm.startPrank(WALLET);
         bool result = validatorModule.validateSignatureWithData(message, sig, installData());
@@ -39,7 +39,7 @@ abstract contract StatelessValidatorTestBase is ModuleTestBase {
         IStatelessValidator validatorModule = IStatelessValidator(address(module));
 
         bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
-        bytes memory sig = statelessValidationSignature(message, false);
+        (,bytes memory sig) = statelessValidationSignature(message, false);
 
         vm.startPrank(WALLET);
         bool result = validatorModule.validateSignatureWithData(message, sig, installData());

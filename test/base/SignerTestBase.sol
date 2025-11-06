@@ -22,7 +22,7 @@ abstract contract SignerTestBase is ModuleTestBase {
         internal
         view
         virtual
-        returns (bytes memory);
+        returns (address sender, bytes memory signature);
     
     function testModuleTypeSigner() public view {
         ISigner signerModule = ISigner(address(module));
@@ -134,10 +134,10 @@ abstract contract SignerTestBase is ModuleTestBase {
         vm.stopPrank();
 
         bytes32 testHash = keccak256(abi.encodePacked("TEST_HASH"));
-        bytes memory signature = erc1271Signature(testHash, true);
+        (address sender, bytes memory signature) = erc1271Signature(testHash, true);
 
         vm.startPrank(WALLET);
-        bytes4 result = signerModule.checkSignature(signerId(), WALLET, testHash, signature);
+        bytes4 result = signerModule.checkSignature(signerId(), sender, testHash, signature);
         vm.stopPrank();
         assertTrue(result == 0x1626ba7e); // ERC1271_MAGICVALUE
     }
@@ -149,10 +149,10 @@ abstract contract SignerTestBase is ModuleTestBase {
         vm.stopPrank();
 
         bytes32 testHash = keccak256(abi.encodePacked("TEST_HASH"));
-        bytes memory signature = erc1271Signature(testHash, false);
+        (address sender, bytes memory signature) = erc1271Signature(testHash, false);
 
         vm.startPrank(WALLET);
-        bytes4 result = signerModule.checkSignature(signerId(), WALLET, testHash, signature);
+        bytes4 result = signerModule.checkSignature(signerId(), sender, testHash, signature);
         vm.stopPrank();
         assertFalse(result == 0x1626ba7e); // ERC1271_INVALID
     }

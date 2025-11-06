@@ -43,18 +43,18 @@ contract ECDSASignerTest is
     function erc1271Signature(
         bytes32 hash,
         bool valid
-    ) internal view virtual override returns (bytes memory) {
+    ) internal view virtual override returns (address,bytes memory) {
         if (!valid) {
             hash = keccak256(abi.encodePacked("invalid", hash));
         }
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(ownerKey, hash);
-        return abi.encodePacked(r, s, v);
+        return (address(0), abi.encodePacked(r, s, v));
     }
 
     function statelessValidationSignature(
         bytes32 hash,
         bool valid
-    ) internal view virtual override returns (bytes memory) {
+    ) internal view virtual override returns (address, bytes memory) {
         return erc1271Signature(hash, valid);
     }
 
@@ -62,7 +62,7 @@ contract ECDSASignerTest is
         address,
         bytes32 hash,
         bool valid
-    ) internal view virtual override returns (bytes memory) {
+    ) internal view virtual override returns (address, bytes memory) {
         return erc1271Signature(hash, valid);
     }
 
