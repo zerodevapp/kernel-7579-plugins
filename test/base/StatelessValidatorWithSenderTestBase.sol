@@ -11,11 +11,11 @@ import {ModuleTestBase} from "./ModuleTestBase.sol";
 
 abstract contract StatelessValidatorWithSenderTestBase is ModuleTestBase {
 
-    function statelessValidationSignatureWithSender(address, bytes32 hash, bool valid)
+    function statelessValidationSignatureWithSender(bytes32 hash, bool valid)
         internal
         view
         virtual
-        returns (bytes memory);
+        returns (address, bytes memory);
     
     function testModuleTypeStatelessValidatorWithSender() public view{
         IStatelessValidatorWithSender validatorModule = IStatelessValidatorWithSender(address(module));
@@ -27,8 +27,7 @@ abstract contract StatelessValidatorWithSenderTestBase is ModuleTestBase {
         IStatelessValidatorWithSender validatorModule = IStatelessValidatorWithSender(address(module));
 
         bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
-        address caller = address(0xABCD);
-        bytes memory sig = statelessValidationSignatureWithSender(caller, message, true);
+        (address caller, bytes memory sig) = statelessValidationSignatureWithSender( message, true);
 
         vm.startPrank(WALLET);
         bool result = validatorModule.validateSignatureWithDataWithSender(caller, message, sig, installData());
@@ -41,8 +40,7 @@ abstract contract StatelessValidatorWithSenderTestBase is ModuleTestBase {
         IStatelessValidatorWithSender validatorModule = IStatelessValidatorWithSender(address(module));
 
         bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
-        address caller = address(0xABCD);
-        bytes memory sig = statelessValidationSignatureWithSender(caller, message, false);
+        (address caller, bytes memory sig) = statelessValidationSignatureWithSender( message, false);
 
         vm.startPrank(WALLET);
         bool result = validatorModule.validateSignatureWithDataWithSender(caller, message, sig, installData());
