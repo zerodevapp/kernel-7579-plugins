@@ -9,11 +9,7 @@ import {IModule} from "src/interfaces/IERC7579Modules.sol";
 import {ECDSA} from "solady/utils/ECDSA.sol";
 import "forge-std/console.sol";
 
-contract WeightedECDSASignerTest is
-    SignerTestBase,
-    StatelessValidatorTestBase,
-    StatelessValidatorWithSenderTestBase
-{
+contract WeightedECDSASignerTest is SignerTestBase, StatelessValidatorTestBase, StatelessValidatorWithSenderTestBase {
     address guardian1;
     uint256 guardian1Key;
     address guardian2;
@@ -50,10 +46,13 @@ contract WeightedECDSASignerTest is
         return abi.encode(guardians, weights, threshold);
     }
 
-    function userOpSignature(
-        PackedUserOperation memory userOp,
-        bool valid
-    ) internal view virtual override returns (bytes memory) {
+    function userOpSignature(PackedUserOperation memory userOp, bool valid)
+        internal
+        view
+        virtual
+        override
+        returns (bytes memory)
+    {
         bytes32 userOpHash = ENTRYPOINT.getUserOpHash(userOp);
 
         if (!valid) {
@@ -106,10 +105,7 @@ contract WeightedECDSASignerTest is
         }
     }
 
-    function erc1271Signature(
-        bytes32 hash,
-        bool valid
-    ) internal view virtual override returns (address, bytes memory) {
+    function erc1271Signature(bytes32 hash, bool valid) internal view virtual override returns (address, bytes memory) {
         if (!valid) {
             hash = keccak256(abi.encodePacked("invalid", hash));
         }
@@ -126,10 +122,13 @@ contract WeightedECDSASignerTest is
         }
     }
 
-    function statelessValidationSignature(
-        bytes32 hash,
-        bool valid
-    ) internal view virtual override returns (address, bytes memory) {
+    function statelessValidationSignature(bytes32 hash, bool valid)
+        internal
+        view
+        virtual
+        override
+        returns (address, bytes memory)
+    {
         if (!valid) {
             hash = keccak256(abi.encodePacked("invalid", hash));
         }
@@ -149,10 +148,13 @@ contract WeightedECDSASignerTest is
         return (address(0), signatures);
     }
 
-    function statelessValidationSignatureWithSender(
-        bytes32 hash,
-        bool valid
-    ) internal view virtual override returns (address, bytes memory) {
+    function statelessValidationSignatureWithSender(bytes32 hash, bool valid)
+        internal
+        view
+        virtual
+        override
+        returns (address, bytes memory)
+    {
         return statelessValidationSignature(hash, valid);
     }
 
@@ -161,14 +163,14 @@ contract WeightedECDSASignerTest is
     function _afterInstallCheck(bytes32 id) internal override {
         WeightedECDSASigner signerModule = WeightedECDSASigner(address(module));
         // Check that the signer was installed by checking totalWeight for this ID
-        (uint24 totalWeight, , ) = signerModule.weightedStorage(id, WALLET);
+        (uint24 totalWeight,,) = signerModule.weightedStorage(id, WALLET);
         assertTrue(totalWeight > 0);
     }
 
     function _afterUninstallCheck(bytes32 id) internal override {
         WeightedECDSASigner signerModule = WeightedECDSASigner(address(module));
         // Check that the signer was uninstalled by checking totalWeight is 0 for this ID
-        (uint24 totalWeight, , ) = signerModule.weightedStorage(id, WALLET);
+        (uint24 totalWeight,,) = signerModule.weightedStorage(id, WALLET);
         assertEq(totalWeight, 0);
     }
 

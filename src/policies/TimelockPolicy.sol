@@ -420,12 +420,10 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
      * @notice Internal function to validate user operation policy
      * @dev Shared logic for both installed and stateless validator modes
      */
-    function _validateUserOpPolicy(
-        bytes32 id,
-        PackedUserOperation calldata userOp,
-        bytes calldata sig,
-        address account
-    ) internal returns (uint256) {
+    function _validateUserOpPolicy(bytes32 id, PackedUserOperation calldata userOp, bytes calldata sig, address account)
+        internal
+        returns (uint256)
+    {
         TimelockConfig storage config = timelockConfig[id][account];
         if (!config.initialized) return SIG_VALIDATION_FAILED_UINT;
 

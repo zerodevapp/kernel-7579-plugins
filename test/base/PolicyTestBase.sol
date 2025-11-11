@@ -9,7 +9,7 @@ import {ModuleTestBase} from "./ModuleTestBase.sol";
 import {MODULE_TYPE_POLICY} from "src/types/Constants.sol";
 
 abstract contract PolicyTestBase is ModuleTestBase {
-    function policyId() internal view virtual returns(bytes32) {
+    function policyId() internal view virtual returns (bytes32) {
         return keccak256(abi.encodePacked("POLICY_ID_1"));
     }
 

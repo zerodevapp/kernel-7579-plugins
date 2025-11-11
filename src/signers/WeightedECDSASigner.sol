@@ -118,12 +118,12 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         return _validateStatelessSignature(hash, signature, guardians, weights, threshold);
     }
 
-    function validateSignatureWithDataWithSender(
-        address,
-        bytes32 hash,
-        bytes calldata signature,
-        bytes calldata data
-    ) external view override(IStatelessValidatorWithSender) returns (bool) {
+    function validateSignatureWithDataWithSender(address, bytes32 hash, bytes calldata signature, bytes calldata data)
+        external
+        view
+        override(IStatelessValidatorWithSender)
+        returns (bool)
+    {
         (address[] memory guardians, uint24[] memory weights, uint24 threshold) =
             abi.decode(data, (address[], uint24[], uint24));
         return _validateStatelessSignature(hash, signature, guardians, weights, threshold);

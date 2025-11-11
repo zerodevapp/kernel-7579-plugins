@@ -71,10 +71,9 @@ contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessVal
         returns (uint256)
     {
         address owner = ecdsaValidatorStorage[msg.sender].owner;
-        return
-            _verifySignature(userOpHash, userOp.signature, owner)
-                ? SIG_VALIDATION_SUCCESS_UINT
-                : SIG_VALIDATION_FAILED_UINT;
+        return _verifySignature(userOpHash, userOp.signature, owner)
+            ? SIG_VALIDATION_SUCCESS_UINT
+            : SIG_VALIDATION_FAILED_UINT;
     }
 
     function isValidSignatureWithSender(address, bytes32 hash, bytes calldata sig)

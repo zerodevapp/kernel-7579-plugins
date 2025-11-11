@@ -9,11 +9,7 @@ import {ModuleTestBase} from "./ModuleTestBase.sol";
 import {MODULE_TYPE_VALIDATOR} from "src/types/Constants.sol";
 
 abstract contract ValidatorTestBase is ModuleTestBase {
-    function userOpSignature(PackedUserOperation memory userOp, bool valid)
-        internal
-        view
-        virtual
-        returns (bytes memory);
+    function userOpSignature(PackedUserOperation memory userOp, bool valid) internal view virtual returns (bytes memory);
 
     function erc1271Signature(bytes32 hash, bool valid)
         internal
