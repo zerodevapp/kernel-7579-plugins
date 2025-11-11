@@ -8,13 +8,10 @@ import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOper
 import {IModule} from "src/interfaces/IERC7579Modules.sol";
 import "forge-std/console.sol";
 
-contract ECDSASignerTest is
-    SignerTestBase,
-    StatelessValidatorTestBase,
-    StatelessValidatorWithSenderTestBase
-{
+contract ECDSASignerTest is SignerTestBase, StatelessValidatorTestBase, StatelessValidatorWithSenderTestBase {
     address owner;
     uint256 ownerKey;
+
     function deployModule() internal virtual override returns (IModule) {
         return new ECDSASigner();
     }
@@ -27,10 +24,13 @@ contract ECDSASignerTest is
         return abi.encodePacked(owner);
     }
 
-    function userOpSignature(
-        PackedUserOperation memory userOp,
-        bool valid
-    ) internal view virtual override returns (bytes memory) {
+    function userOpSignature(PackedUserOperation memory userOp, bool valid)
+        internal
+        view
+        virtual
+        override
+        returns (bytes memory)
+    {
         console.log("owner:", owner);
         bytes32 hash = ENTRYPOINT.getUserOpHash(userOp);
         if (!valid) {
@@ -40,10 +40,7 @@ contract ECDSASignerTest is
         return abi.encodePacked(r, s, v);
     }
 
-    function erc1271Signature(
-        bytes32 hash,
-        bool valid
-    ) internal view virtual override returns (address,bytes memory) {
+    function erc1271Signature(bytes32 hash, bool valid) internal view virtual override returns (address, bytes memory) {
         if (!valid) {
             hash = keccak256(abi.encodePacked("invalid", hash));
         }
@@ -51,17 +48,23 @@ contract ECDSASignerTest is
         return (address(0), abi.encodePacked(r, s, v));
     }
 
-    function statelessValidationSignature(
-        bytes32 hash,
-        bool valid
-    ) internal view virtual override returns (address, bytes memory) {
+    function statelessValidationSignature(bytes32 hash, bool valid)
+        internal
+        view
+        virtual
+        override
+        returns (address, bytes memory)
+    {
         return erc1271Signature(hash, valid);
     }
 
-    function statelessValidationSignatureWithSender(
-        bytes32 hash,
-        bool valid
-    ) internal view virtual override returns (address, bytes memory) {
+    function statelessValidationSignatureWithSender(bytes32 hash, bool valid)
+        internal
+        view
+        virtual
+        override
+        returns (address, bytes memory)
+    {
         return erc1271Signature(hash, valid);
     }
 }

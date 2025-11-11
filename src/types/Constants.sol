@@ -9,6 +9,9 @@ uint256 constant MODULE_TYPE_SIGNER = 6;
 uint256 constant MODULE_TYPE_STATELESS_VALIDATOR = 7;
 uint256 constant MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER = 10;
 
+bytes1 constant CALLTYPE_SINGLE = 0x00;
+bytes1 constant CALLTYPE_BATCH = 0x01;
+
 bytes4 constant ERC1271_MAGICVALUE = 0x1626ba7e;
 bytes4 constant ERC1271_INVALID = 0xffffffff;
 uint256 constant SIG_VALIDATION_FAILED_UINT = 1;
