@@ -21,7 +21,6 @@ abstract contract SignerBase is ISigner {
         return id == 6;
     }
 
-    function isInitialized(address) external view virtual returns (bool); // TODO : not sure if this is the right way to do it
     function checkUserOpSignature(bytes32 id, PackedUserOperation calldata userOp, bytes32 userOpHash)
         external
         payable

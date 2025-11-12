@@ -21,19 +21,19 @@ import {
 } from "src/types/Constants.sol";
 
 contract SignaturePolicy is PolicyBase, IStatelessValidatorWithSender {
-    mapping(address => uint256) public usedIds;
     mapping(bytes32 id => mapping(address => Status)) public status;
     mapping(bytes32 id => mapping(address caller => mapping(address wallet => bool))) public allowedCaller;
 
-    function isModuleType(uint256 typeID) external pure override(IModule,PolicyBase) returns (bool) {
+    function isModuleType(uint256 typeID) external pure override(IModule, PolicyBase) returns (bool) {
         return typeID == MODULE_TYPE_POLICY || typeID == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
     }
 
-    function isInitialized(address wallet) external view override(IModule,PolicyBase) returns (bool) {
-        return usedIds[wallet] > 0;
-    }
-
-    function checkUserOpPolicy(bytes32 id, PackedUserOperation calldata userOp) external payable override returns (uint256) {
+    function checkUserOpPolicy(bytes32 id, PackedUserOperation calldata userOp)
+        external
+        payable
+        override
+        returns (uint256)
+    {
         return _validateUserOpPolicy(id, msg.sender);
     }
 
@@ -80,13 +80,11 @@ contract SignaturePolicy is PolicyBase, IStatelessValidatorWithSender {
             allowedCaller[id][callers[i]][msg.sender] = true;
         }
         status[id][msg.sender] = Status.Live;
-        usedIds[msg.sender]++;
     }
 
     function _policyOnUninstall(bytes32 id, bytes calldata _data) internal override {
         require(status[id][msg.sender] == Status.Live);
         status[id][msg.sender] = Status.Deprecated;
-        usedIds[msg.sender]--;
     }
 
     function validateSignatureWithDataWithSender(address sender, bytes32, bytes calldata, bytes calldata data)

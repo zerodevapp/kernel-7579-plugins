@@ -47,10 +47,6 @@ contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessVal
             || typeID == MODULE_TYPE_STATELESS_VALIDATOR || typeID == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
     }
 
-    function isInitialized(address smartAccount) external view override returns (bool) {
-        return _isInitialized(smartAccount);
-    }
-
     function _isInitialized(address smartAccount) internal view returns (bool) {
         return ecdsaValidatorStorage[smartAccount].owner != address(0);
     }
@@ -71,10 +67,9 @@ contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessVal
         returns (uint256)
     {
         address owner = ecdsaValidatorStorage[msg.sender].owner;
-        return
-            _verifySignature(userOpHash, userOp.signature, owner)
-                ? SIG_VALIDATION_SUCCESS_UINT
-                : SIG_VALIDATION_FAILED_UINT;
+        return _verifySignature(userOpHash, userOp.signature, owner)
+            ? SIG_VALIDATION_SUCCESS_UINT
+            : SIG_VALIDATION_FAILED_UINT;
     }
 
     function isValidSignatureWithSender(address, bytes32 hash, bytes calldata sig)

@@ -31,7 +31,7 @@ contract WebAuthnSigner is SignerBase {
     // The P256 public keys of a kernel.
     mapping(bytes32 id => mapping(address kernel => WebAuthnSignerData)) public webAuthnSignerStorage;
 
-    function isInitialized(address kernel) external view override returns (bool) {
+    function isInitialized(address kernel) external view returns (bool) {
         return _isInitialized(kernel);
     }
 

@@ -8,10 +8,7 @@ import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOper
 import {IModule} from "src/interfaces/IERC7579Modules.sol";
 import "forge-std/console.sol";
 
-contract SignaturePolicyTest is
-    PolicyTestBase,
-    StatelessValidatorWithSenderTestBase
-{
+contract SignaturePolicyTest is PolicyTestBase, StatelessValidatorWithSenderTestBase {
     address allowedCaller;
     address disallowedCaller;
 
@@ -30,59 +27,39 @@ contract SignaturePolicyTest is
         return abi.encode(callers);
     }
 
-    function validUserOp()
-        internal
-        view
-        virtual
-        override
-        returns (PackedUserOperation memory)
-    {
+    function validUserOp() internal view virtual override returns (PackedUserOperation memory) {
         // SignaturePolicy always passes for live policies in checkUserOpPolicy
-        return
-            PackedUserOperation({
-                sender: WALLET,
-                nonce: 0,
-                initCode: "",
-                callData: "",
-                accountGasLimits: bytes32(
-                    abi.encodePacked(uint128(100000), uint128(200000))
-                ),
-                preVerificationGas: 0,
-                gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
-                paymasterAndData: "",
-                signature: ""
-            });
+        return PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: ""
+        });
     }
 
-    function invalidUserOp()
-        internal
-        view
-        virtual
-        override
-        returns (PackedUserOperation memory)
-    {
+    function invalidUserOp() internal view virtual override returns (PackedUserOperation memory) {
         // For SignaturePolicy, userOp validation always passes if policy is live
         // To make it fail, we would need to use a non-live policy, but that's tested separately
         // For this test, we'll just return a userOp (the fail case is tested by not installing)
-        return
-            PackedUserOperation({
-                sender: address(0xDEAD), // Different sender to simulate non-installed policy
-                nonce: 0,
-                initCode: "",
-                callData: "",
-                accountGasLimits: bytes32(
-                    abi.encodePacked(uint128(100000), uint128(200000))
-                ),
-                preVerificationGas: 0,
-                gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
-                paymasterAndData: "",
-                signature: ""
-            });
+        return PackedUserOperation({
+            sender: address(0xDEAD), // Different sender to simulate non-installed policy
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: ""
+        });
     }
 
-    function validSignatureData(
-        bytes32 hash
-    )
+    function validSignatureData(bytes32 hash)
         internal
         view
         virtual
@@ -93,9 +70,7 @@ contract SignaturePolicyTest is
         return (allowedCaller, "");
     }
 
-    function invalidSignatureData(
-        bytes32 hash
-    )
+    function invalidSignatureData(bytes32 hash)
         internal
         view
         virtual
@@ -108,11 +83,7 @@ contract SignaturePolicyTest is
 
     // Override the fail test because SignaturePolicy's checkUserOpPolicy doesn't validate based on userOp content
     // It only checks if the policy is live for the calling account
-    function testPolicyAfterInstallCheckUserOpPolicyFail()
-        public
-        payable
-        override
-    {
+    function testPolicyAfterInstallCheckUserOpPolicyFail() public payable override {
         SignaturePolicy policyModule = SignaturePolicy(address(module));
 
         // Don't install for this account
@@ -121,18 +92,18 @@ contract SignaturePolicyTest is
         PackedUserOperation memory userOp = validUserOp();
 
         vm.startPrank(nonInstalledAccount);
-        uint256 validationResult = policyModule.checkUserOpPolicy(
-            policyId(),
-            userOp
-        );
+        uint256 validationResult = policyModule.checkUserOpPolicy(policyId(), userOp);
         vm.stopPrank();
         assertFalse(validationResult == 0);
     }
 
-    function statelessValidationSignatureWithSender(
-        bytes32 hash,
-        bool valid
-    ) internal view virtual override returns (address, bytes memory) {
+    function statelessValidationSignatureWithSender(bytes32 hash, bool valid)
+        internal
+        view
+        virtual
+        override
+        returns (address, bytes memory)
+    {
         return valid ? validSignatureData(hash) : invalidSignatureData(hash);
     }
 }

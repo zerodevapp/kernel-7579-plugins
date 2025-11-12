@@ -9,11 +9,7 @@ import {IModule, IHook} from "src/interfaces/IERC7579Modules.sol";
 import {MODULE_TYPE_HOOK} from "src/types/Constants.sol";
 import "forge-std/console.sol";
 
-contract ECDSAValidatorTest is
-    ValidatorTestBase,
-    StatelessValidatorTestBase,
-    StatelessValidatorWithSenderTestBase
-{
+contract ECDSAValidatorTest is ValidatorTestBase, StatelessValidatorTestBase, StatelessValidatorWithSenderTestBase {
     address owner;
     uint256 ownerKey;
 
@@ -29,10 +25,13 @@ contract ECDSAValidatorTest is
         return abi.encodePacked(owner);
     }
 
-    function userOpSignature(
-        PackedUserOperation memory userOp,
-        bool valid
-    ) internal view virtual override returns (bytes memory) {
+    function userOpSignature(PackedUserOperation memory userOp, bool valid)
+        internal
+        view
+        virtual
+        override
+        returns (bytes memory)
+    {
         bytes32 hash = ENTRYPOINT.getUserOpHash(userOp);
         if (!valid) {
             hash = keccak256(abi.encodePacked("invalid", hash));
@@ -41,10 +40,13 @@ contract ECDSAValidatorTest is
         return abi.encodePacked(r, s, v);
     }
 
-    function erc1271Signature(
-        bytes32 hash,
-        bool valid
-    ) internal view virtual override returns (address sender, bytes memory signature) {
+    function erc1271Signature(bytes32 hash, bool valid)
+        internal
+        view
+        virtual
+        override
+        returns (address sender, bytes memory signature)
+    {
         if (!valid) {
             hash = keccak256(abi.encodePacked("invalid", hash));
         }
@@ -52,10 +54,13 @@ contract ECDSAValidatorTest is
         return (address(0), abi.encodePacked(r, s, v));
     }
 
-    function statelessValidationSignature(
-        bytes32 hash,
-        bool valid
-    ) internal view virtual override returns (address, bytes memory) {
+    function statelessValidationSignature(bytes32 hash, bool valid)
+        internal
+        view
+        virtual
+        override
+        returns (address, bytes memory)
+    {
         if (!valid) {
             hash = keccak256(abi.encodePacked("invalid", hash));
         }
@@ -63,10 +68,13 @@ contract ECDSAValidatorTest is
         return (address(0), abi.encodePacked(r, s, v));
     }
 
-    function statelessValidationSignatureWithSender(
-        bytes32 hash,
-        bool valid
-    ) internal view virtual override returns (address, bytes memory) {
+    function statelessValidationSignatureWithSender(bytes32 hash, bool valid)
+        internal
+        view
+        virtual
+        override
+        returns (address, bytes memory)
+    {
         return statelessValidationSignature(hash, valid);
     }
 

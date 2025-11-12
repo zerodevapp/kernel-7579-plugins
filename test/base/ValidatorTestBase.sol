@@ -9,11 +9,7 @@ import {ModuleTestBase} from "./ModuleTestBase.sol";
 import {MODULE_TYPE_VALIDATOR} from "src/types/Constants.sol";
 
 abstract contract ValidatorTestBase is ModuleTestBase {
-    function userOpSignature(PackedUserOperation memory userOp, bool valid)
-        internal
-        view
-        virtual
-        returns (bytes memory);
+    function userOpSignature(PackedUserOperation memory userOp, bool valid) internal view virtual returns (bytes memory);
 
     function erc1271Signature(bytes32 hash, bool valid)
         internal
@@ -27,22 +23,12 @@ abstract contract ValidatorTestBase is ModuleTestBase {
         assertTrue(result);
     }
 
-    function _afterInstallCheck() internal virtual {
-        IValidator validatorModule = IValidator(address(module));
-        bool initializedAfter = validatorModule.isInitialized(WALLET);
-        assertEq(initializedAfter, true);
-    }
+    function _afterInstallCheck() internal virtual {}
 
-    function _afterUninstallCheck() internal virtual {
-        IValidator validatorModule = IValidator(address(module));
-        bool initializedAfterUninstall = validatorModule.isInitialized(WALLET);
-        assertEq(initializedAfterUninstall, false);
-    }
+    function _afterUninstallCheck() internal virtual {}
 
     function testValidatorOnInstall() public payable {
         IValidator validatorModule = IValidator(address(module));
-        bool initializedBefore = validatorModule.isInitialized(WALLET);
-        assertEq(initializedBefore, false);
         vm.startPrank(WALLET);
         validatorModule.onInstall(installData());
         vm.stopPrank();

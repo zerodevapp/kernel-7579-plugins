@@ -21,7 +21,6 @@ abstract contract PolicyBase is IPolicy {
         return id == 5;
     }
 
-    function isInitialized(address) external view virtual returns (bool); // TODO : not sure if this is the right way to do it
     function checkUserOpPolicy(bytes32 id, PackedUserOperation calldata userOp)
         external
         payable

@@ -81,10 +81,6 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
             || moduleTypeId == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
     }
 
-    function isInitialized(address smartAccount) external view override(IModule, SignerBase) returns (bool) {
-        return _isInitialized(bytes32(0), smartAccount);
-    }
-
     function _isInitialized(bytes32 id, address smartAccount) internal view returns (bool) {
         return weightedStorage[id][smartAccount].totalWeight != 0;
     }
@@ -118,12 +114,12 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         return _validateStatelessSignature(hash, signature, guardians, weights, threshold);
     }
 
-    function validateSignatureWithDataWithSender(
-        address,
-        bytes32 hash,
-        bytes calldata signature,
-        bytes calldata data
-    ) external view override(IStatelessValidatorWithSender) returns (bool) {
+    function validateSignatureWithDataWithSender(address, bytes32 hash, bytes calldata signature, bytes calldata data)
+        external
+        view
+        override(IStatelessValidatorWithSender)
+        returns (bool)
+    {
         (address[] memory guardians, uint24[] memory weights, uint24 threshold) =
             abi.decode(data, (address[], uint24[], uint24));
         return _validateStatelessSignature(hash, signature, guardians, weights, threshold);

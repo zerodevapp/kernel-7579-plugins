@@ -15,16 +15,11 @@ import {
 } from "src/types/Constants.sol";
 
 contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWithSender {
-    mapping(address => uint256) public usedIds;
     mapping(bytes32 id => mapping(address wallet => address)) public signer;
 
     function isModuleType(uint256 typeID) external pure override(IModule, SignerBase) returns (bool) {
         return typeID == MODULE_TYPE_SIGNER || typeID == MODULE_TYPE_STATELESS_VALIDATOR
             || typeID == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
-    }
-
-    function isInitialized(address wallet) external view override(IModule, SignerBase) returns (bool) {
-        return usedIds[wallet] > 0;
     }
 
     function _verifySignature(bytes32 hash, bytes calldata sig, address _signer) internal view returns (bool) {
@@ -43,10 +38,9 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
         returns (uint256)
     {
         address owner = signer[id][msg.sender];
-        return
-            _verifySignature(userOpHash, userOp.signature, owner)
-                ? SIG_VALIDATION_SUCCESS_UINT
-                : SIG_VALIDATION_FAILED_UINT;
+        return _verifySignature(userOpHash, userOp.signature, owner)
+            ? SIG_VALIDATION_SUCCESS_UINT
+            : SIG_VALIDATION_FAILED_UINT;
     }
 
     function checkSignature(bytes32 id, address sender, bytes32 hash, bytes calldata sig)
@@ -61,14 +55,12 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
 
     function _signerOninstall(bytes32 id, bytes calldata _data) internal override {
         require(signer[id][msg.sender] == address(0));
-        usedIds[msg.sender]++;
         signer[id][msg.sender] = address(bytes20(_data[0:20]));
     }
 
     function _signerOnUninstall(bytes32 id, bytes calldata) internal override {
         require(signer[id][msg.sender] != address(0));
         delete signer[id][msg.sender];
-        usedIds[msg.sender]--;
     }
 
     function validateSignatureWithData(bytes32 hash, bytes calldata signature, bytes calldata data)

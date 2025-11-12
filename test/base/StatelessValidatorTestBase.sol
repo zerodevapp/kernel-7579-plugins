@@ -9,14 +9,13 @@ import {ModuleTestBase} from "./ModuleTestBase.sol";
 import {MODULE_TYPE_STATELESS_VALIDATOR} from "src/types/Constants.sol";
 
 abstract contract StatelessValidatorTestBase is ModuleTestBase {
-
     function statelessValidationSignature(bytes32 hash, bool valid)
         internal
         view
         virtual
         returns (address, bytes memory);
-    function testModuleTypeStatelessValidator() public view
-    {
+
+    function testModuleTypeStatelessValidator() public view {
         IStatelessValidator validatorModule = IStatelessValidator(address(module));
         bool result = validatorModule.isModuleType(MODULE_TYPE_STATELESS_VALIDATOR); // MODULE_TYPE_STATELESS_VALIDATOR = 4
         assertTrue(result);
@@ -39,7 +38,7 @@ abstract contract StatelessValidatorTestBase is ModuleTestBase {
         IStatelessValidator validatorModule = IStatelessValidator(address(module));
 
         bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
-        (,bytes memory sig) = statelessValidationSignature(message, false);
+        (, bytes memory sig) = statelessValidationSignature(message, false);
 
         vm.startPrank(WALLET);
         bool result = validatorModule.validateSignatureWithData(message, sig, installData());
@@ -47,5 +46,4 @@ abstract contract StatelessValidatorTestBase is ModuleTestBase {
 
         assertFalse(result);
     }
-
 }
