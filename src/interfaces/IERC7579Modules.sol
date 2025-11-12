@@ -32,11 +32,6 @@ interface IModule {
      * MUST return true if the module is of the given type and false otherwise
      */
     function isModuleType(uint256 moduleTypeId) external view returns (bool);
-
-    /**
-     * @dev Returns if the module was already initialized for a provided smartaccount
-     */
-    function isInitialized(address smartAccount) external view returns (bool);
 }
 
 interface IValidator is IModule {

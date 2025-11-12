@@ -48,9 +48,6 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
     // userOpKey = keccak256(abi.encode(account, keccak256(callData), nonce))
     mapping(bytes32 => mapping(bytes32 => mapping(address => Proposal))) public proposals;
 
-    // Track number of installed policies per wallet
-    mapping(address => uint256) public usedIds;
-
     event ProposalCreated(
         address indexed wallet, bytes32 indexed id, bytes32 indexed proposalHash, uint256 validAfter, uint256 validUntil
     );
@@ -87,8 +84,6 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         timelockConfig[id][msg.sender] =
             TimelockConfig({delay: delay, expirationPeriod: expirationPeriod, initialized: true});
 
-        usedIds[msg.sender]++;
-
         emit TimelockConfigUpdated(msg.sender, id, delay, expirationPeriod);
     }
 
@@ -101,14 +96,6 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         }
 
         delete timelockConfig[id][msg.sender];
-        usedIds[msg.sender]--;
-    }
-
-    /**
-     * @notice Check if the policy is initialized for a wallet
-     */
-    function isInitialized(address wallet) public view override(IModule, PolicyBase) returns (bool) {
-        return usedIds[wallet] > 0;
     }
 
     /**
@@ -420,12 +407,10 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
      * @notice Internal function to validate user operation policy
      * @dev Shared logic for both installed and stateless validator modes
      */
-    function _validateUserOpPolicy(
-        bytes32 id,
-        PackedUserOperation calldata userOp,
-        bytes calldata sig,
-        address account
-    ) internal returns (uint256) {
+    function _validateUserOpPolicy(bytes32 id, PackedUserOperation calldata userOp, bytes calldata sig, address account)
+        internal
+        returns (uint256)
+    {
         TimelockConfig storage config = timelockConfig[id][account];
         if (!config.initialized) return SIG_VALIDATION_FAILED_UINT;
 
