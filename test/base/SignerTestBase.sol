@@ -7,45 +7,32 @@ import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {EntryPointLib} from "../utils/EntryPointLib.sol";
 import {ModuleTestBase} from "./ModuleTestBase.sol";
 import {MODULE_TYPE_SIGNER} from "src/types/Constants.sol";
+
 abstract contract SignerTestBase is ModuleTestBase {
-    function signerId() internal view virtual returns(bytes32) {
+    function signerId() internal view virtual returns (bytes32) {
         return keccak256(abi.encodePacked("SIGNER_ID_1"));
     }
 
-    function userOpSignature(PackedUserOperation memory userOp, bool valid)
-        internal
-        view
-        virtual
-        returns (bytes memory);
+    function userOpSignature(PackedUserOperation memory userOp, bool valid) internal view virtual returns (bytes memory);
 
     function erc1271Signature(bytes32 hash, bool valid)
         internal
         view
         virtual
         returns (address sender, bytes memory signature);
-    
+
     function testModuleTypeSigner() public view {
         ISigner signerModule = ISigner(address(module));
         bool result = signerModule.isModuleType(MODULE_TYPE_SIGNER); // 6 is the module type for Signer
         assertTrue(result);
     }
 
-    function _afterInstallCheck(bytes32 id) internal virtual {
-        ISigner signerModule = ISigner(address(module));
-        bool initializedAfter = signerModule.isInitialized(WALLET);
-        assertEq(initializedAfter, true);
-    }
+    function _afterInstallCheck(bytes32 id) internal virtual {}
 
-    function _afterUninstallCheck(bytes32 id) internal virtual {
-        ISigner signerModule = ISigner(address(module));
-        bool initializedAfterUninstall = signerModule.isInitialized(WALLET);
-        assertEq(initializedAfterUninstall, false);
-    }
+    function _afterUninstallCheck(bytes32 id) internal virtual {}
 
     function testSignerOnInstall() public payable virtual {
         ISigner signerModule = ISigner(address(module));
-        bool initializedBefore = signerModule.isInitialized(WALLET);
-        assertEq(initializedBefore, false);
         vm.startPrank(WALLET);
         signerModule.onInstall(abi.encodePacked(signerId(), installData()));
         vm.stopPrank();
@@ -105,7 +92,8 @@ abstract contract SignerTestBase is ModuleTestBase {
         userOp.signature = userOpSignature(userOp, true);
 
         vm.startPrank(WALLET);
-        uint256 validationResult = signerModule.checkUserOpSignature(signerId(), userOp, ENTRYPOINT.getUserOpHash(userOp));
+        uint256 validationResult =
+            signerModule.checkUserOpSignature(signerId(), userOp, ENTRYPOINT.getUserOpHash(userOp));
         vm.stopPrank();
         assertEq(validationResult, 0);
     }
@@ -132,7 +120,8 @@ abstract contract SignerTestBase is ModuleTestBase {
         userOp.signature = userOpSignature(userOp, false);
 
         vm.startPrank(WALLET);
-        uint256 validationResult = signerModule.checkUserOpSignature(signerId(), userOp, ENTRYPOINT.getUserOpHash(userOp));
+        uint256 validationResult =
+            signerModule.checkUserOpSignature(signerId(), userOp, ENTRYPOINT.getUserOpHash(userOp));
         vm.stopPrank();
         assertFalse(validationResult == 0);
     }

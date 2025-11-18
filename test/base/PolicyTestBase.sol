@@ -9,7 +9,7 @@ import {ModuleTestBase} from "./ModuleTestBase.sol";
 import {MODULE_TYPE_POLICY} from "src/types/Constants.sol";
 
 abstract contract PolicyTestBase is ModuleTestBase {
-    function policyId() internal view virtual returns(bytes32) {
+    function policyId() internal view virtual returns (bytes32) {
         return keccak256(abi.encodePacked("POLICY_ID_1"));
     }
 
@@ -27,22 +27,12 @@ abstract contract PolicyTestBase is ModuleTestBase {
         assertTrue(result);
     }
 
-    function _afterInstallCheck(bytes32 id) internal virtual {
-        IPolicy policyModule = IPolicy(address(module));
-        bool initializedAfter = policyModule.isInitialized(WALLET);
-        assertEq(initializedAfter, true);
-    }
+    function _afterInstallCheck(bytes32 id) internal virtual {}
 
-    function _afterUninstallCheck(bytes32 id) internal virtual {
-        IPolicy policyModule = IPolicy(address(module));
-        bool initializedAfterUninstall = policyModule.isInitialized(WALLET);
-        assertEq(initializedAfterUninstall, false);
-    }
+    function _afterUninstallCheck(bytes32 id) internal virtual {}
 
     function testPolicyOnInstall() public payable {
         IPolicy policyModule = IPolicy(address(module));
-        bool initializedBefore = policyModule.isInitialized(WALLET);
-        assertEq(initializedBefore, false);
         vm.startPrank(WALLET);
         policyModule.onInstall(abi.encodePacked(policyId(), installData()));
         vm.stopPrank();

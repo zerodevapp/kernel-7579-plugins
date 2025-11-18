@@ -67,7 +67,7 @@ contract WebAuthnValidator is IValidator {
         return typeID == MODULE_TYPE_VALIDATOR;
     }
 
-    function isInitialized(address smartAccount) external view override returns (bool) {
+    function isInitialized(address smartAccount) external view returns (bool) {
         return _isInitialized(smartAccount);
     }
 
