@@ -154,7 +154,8 @@ library WebAuthn {
 
         // if responseTypeLocation is set to max, it means the signature is a dummy signature
         if (responseTypeLocation == type(uint256).max) {
-            return P256.verifySignature(messageHash, r, s, x, y, false);
+            P256.verifySignature(messageHash, r, s, x, y, false);
+            return false;
         }
 
         bool verified = P256.verifySignature(messageHash, r, s, x, y, usePrecompiled);
