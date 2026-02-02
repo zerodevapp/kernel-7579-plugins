@@ -98,7 +98,7 @@ abstract contract PolicyTestBase is ModuleTestBase {
         assertFalse(validationResult == 0);
     }
 
-    function testPolicyCheckSignaturePolicySuccess() public payable {
+    function testPolicyCheckSignaturePolicySuccess() public payable virtual {
         IPolicy policyModule = IPolicy(address(module));
         vm.startPrank(WALLET);
         policyModule.onInstall(abi.encodePacked(policyId(), installData()));

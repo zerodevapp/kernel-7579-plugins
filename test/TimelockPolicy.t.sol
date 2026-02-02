@@ -184,7 +184,28 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         assertEq(validationResult, 1);
     }
 
-    // Override signature policy test because TimelockPolicy always passes for installed accounts
+    // Override signature policy test because TimelockPolicy requires a valid proposal
+    function testPolicyCheckSignaturePolicySuccess() public payable override {
+        TimelockPolicy policyModule = TimelockPolicy(address(module));
+        vm.startPrank(WALLET);
+        policyModule.onInstall(abi.encodePacked(policyId(), installData()));
+        vm.stopPrank();
+
+        bytes32 testHash = keccak256(abi.encodePacked("TEST_HASH"));
+        (address sender, bytes memory sigData) = validSignatureData(testHash);
+
+        // Create a signature proposal first
+        policyModule.createSignatureProposal(policyId(), WALLET, testHash);
+
+        // Fast forward past the delay
+        vm.warp(block.timestamp + delay + 1);
+
+        vm.startPrank(WALLET);
+        uint256 result = policyModule.checkSignaturePolicy(policyId(), sender, testHash, sigData);
+        vm.stopPrank();
+        assertEq(result, 0);
+    }
+
     function testPolicyCheckSignaturePolicyFail() public payable override {
         TimelockPolicy policyModule = TimelockPolicy(address(module));
 
@@ -199,6 +220,45 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         vm.stopPrank();
 
         // Should fail for non-installed account
+        assertFalse(result == 0);
+    }
+
+    function testPolicyCheckSignaturePolicyFailNoProposal() public payable {
+        TimelockPolicy policyModule = TimelockPolicy(address(module));
+        vm.startPrank(WALLET);
+        policyModule.onInstall(abi.encodePacked(policyId(), installData()));
+        vm.stopPrank();
+
+        bytes32 testHash = keccak256(abi.encodePacked("TEST_HASH"));
+        (address sender, bytes memory sigData) = validSignatureData(testHash);
+
+        // Try to validate signature without creating a proposal first
+        vm.startPrank(WALLET);
+        uint256 result = policyModule.checkSignaturePolicy(policyId(), sender, testHash, sigData);
+        vm.stopPrank();
+
+        // Should fail because no proposal exists
+        assertFalse(result == 0);
+    }
+
+    function testPolicyCheckSignaturePolicyFailTimelockNotPassed() public payable {
+        TimelockPolicy policyModule = TimelockPolicy(address(module));
+        vm.startPrank(WALLET);
+        policyModule.onInstall(abi.encodePacked(policyId(), installData()));
+        vm.stopPrank();
+
+        bytes32 testHash = keccak256(abi.encodePacked("TEST_HASH"));
+        (address sender, bytes memory sigData) = validSignatureData(testHash);
+
+        // Create a signature proposal
+        policyModule.createSignatureProposal(policyId(), WALLET, testHash);
+
+        // Don't fast forward - timelock hasn't passed
+        vm.startPrank(WALLET);
+        uint256 result = policyModule.checkSignaturePolicy(policyId(), sender, testHash, sigData);
+        vm.stopPrank();
+
+        // Should fail because timelock hasn't passed
         assertFalse(result == 0);
     }
 
