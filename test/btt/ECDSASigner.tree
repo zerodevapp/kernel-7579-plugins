@@ -1,0 +1,49 @@
+ECDSASignerBTTTest
+├── when calling isModuleType with MODULE_TYPE_SIGNER
+│   └── it should return true
+├── when calling isModuleType with MODULE_TYPE_STATELESS_VALIDATOR
+│   └── it should return true
+├── when calling isModuleType with MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER
+│   └── it should return true
+├── when calling isModuleType with an unsupported type
+│   └── it should return false
+├── when calling onInstall with invalid data length
+│   └── it should revert with InvalidDataLength
+├── when calling onInstall with zero address signer
+│   └── it should revert with ZeroAddressSigner
+├── when calling onInstall with already installed signer for same id
+│   └── it should revert with Already installed
+├── when calling onInstall with valid data
+│   └── it should store the signer address
+├── when calling onUninstall with signer not installed
+│   └── it should revert
+├── when calling onUninstall with signer installed
+│   └── it should delete the signer mapping
+├── when calling checkUserOpSignature with signer not installed
+│   └── it should return SIG_VALIDATION_FAILED_UINT
+├── when calling checkUserOpSignature with valid raw hash signature
+│   └── it should return SIG_VALIDATION_SUCCESS_UINT
+├── when calling checkUserOpSignature with valid eth signed message hash
+│   └── it should return SIG_VALIDATION_SUCCESS_UINT
+├── when calling checkUserOpSignature with invalid signature
+│   └── it should return SIG_VALIDATION_FAILED_UINT
+├── when calling checkSignature with signer not installed
+│   └── it should return ERC1271_INVALID
+├── when calling checkSignature with valid raw hash signature
+│   └── it should return ERC1271_MAGICVALUE
+├── when calling checkSignature with valid eth signed message hash
+│   └── it should return ERC1271_MAGICVALUE
+├── when calling checkSignature with invalid signature
+│   └── it should return ERC1271_INVALID
+├── when calling validateSignatureWithData with valid raw hash signature
+│   └── it should return true
+├── when calling validateSignatureWithData with valid eth signed message hash
+│   └── it should return true
+├── when calling validateSignatureWithData with invalid signature
+│   └── it should return false
+├── when calling validateSignatureWithDataWithSender with valid raw hash signature
+│   └── it should return true
+├── when calling validateSignatureWithDataWithSender with valid eth signed message hash
+│   └── it should return true
+└── when calling validateSignatureWithDataWithSender with invalid signature
+    └── it should return false
