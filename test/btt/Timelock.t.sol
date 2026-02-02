@@ -14,11 +14,10 @@ import {
 } from "../../src/types/Constants.sol";
 
 /**
- * @title TimelockProposalCreationTest
- * @notice BTT tests for TimelockPolicy contract including TOB-KERNEL-1 security fix
- * @dev Tests achieve 100% coverage and verify the fix returns validationData=0 for proposal creation
+ * @title TimelockTest
+ * @notice BTT tests for TimelockPolicy contract
  */
-contract TimelockProposalCreationTest is Test {
+contract TimelockTest is Test {
     TimelockPolicy public timelockPolicy;
 
     address public constant WALLET = address(0x1234);
@@ -348,8 +347,8 @@ contract TimelockProposalCreationTest is Test {
         vm.prank(WALLET);
         uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
 
-        // TOB-KERNEL-1 FIX: Should return 0 for state persistence
-        assertEq(result, 0, "Should return 0 for state persistence (TOB-KERNEL-1 fix)");
+        // Proposal creation must return 0 for state persistence
+        assertEq(result, 0, "Should return 0 for state persistence");
 
         (TimelockPolicy.ProposalStatus status,,) =
             timelockPolicy.getProposal(WALLET, proposalCallData, proposalNonce, POLICY_ID, WALLET);
@@ -974,15 +973,14 @@ contract TimelockProposalCreationTest is Test {
         assertEq(result, expectedPacked, "Packed validation data should match expected");
     }
 
-    // ============ TOB-KERNEL-1 Security Tests ============
+    // ============ Security Tests ============
 
-    modifier whenTestingTOBKERNEL1SecurityFix() {
+    modifier whenTestingSecurityScenarios() {
         _;
     }
 
-    function test_GivenAttackerTriesToExecuteWithoutProposal() external whenTestingTOBKERNEL1SecurityFix {
+    function test_GivenAttackerTriesToExecuteWithoutProposal() external whenTestingSecurityScenarios {
         // it should return SIG_VALIDATION_FAILED
-        // Security: Attacker cannot execute arbitrary operations without first creating a proposal
         bytes memory maliciousCalldata =
             abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "steal_funds");
 
@@ -994,10 +992,8 @@ contract TimelockProposalCreationTest is Test {
         assertEq(result, SIG_VALIDATION_FAILED, "Attack without proposal should fail");
     }
 
-    function test_GivenAttackerTriesToExecuteImmediatelyAfterCreation() external whenTestingTOBKERNEL1SecurityFix {
+    function test_GivenAttackerTriesToExecuteImmediatelyAfterCreation() external whenTestingSecurityScenarios {
         // it should return packed data with future validAfter
-        // Security: Even if attacker creates a proposal, they cannot execute immediately
-        // The validAfter will be in the future, causing EntryPoint to reject
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "action");
         uint256 nonce = 1500;
 
@@ -1016,9 +1012,8 @@ contract TimelockProposalCreationTest is Test {
         assertEq(validAfter, uint48(createTime) + DELAY, "validAfter should be createTime + DELAY");
     }
 
-    function test_GivenAttackerTriesToReexecuteAUsedProposal() external whenTestingTOBKERNEL1SecurityFix {
+    function test_GivenAttackerTriesToReexecuteAUsedProposal() external whenTestingSecurityScenarios {
         // it should return SIG_VALIDATION_FAILED
-        // Security: Attacker cannot replay an already executed proposal
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "action");
         uint256 nonce = 1600;
 
@@ -1044,10 +1039,8 @@ contract TimelockProposalCreationTest is Test {
         assertEq(secondResult, SIG_VALIDATION_FAILED, "Re-execution should fail");
     }
 
-    function test_GivenProposalCreationReturnsZero() external whenTestingTOBKERNEL1SecurityFix {
+    function test_GivenProposalCreationReturnsZero() external whenTestingSecurityScenarios {
         // it should allow state to persist via EntryPoint
-        // This is the core TOB-KERNEL-1 fix: proposal creation returns 0 instead of 1
-        // so EntryPoint doesn't revert and state persists
         bytes memory proposalCallData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 proposalNonce = 1700;
         bytes memory sig = _createProposalSignature(proposalCallData, proposalNonce);
@@ -1057,8 +1050,8 @@ contract TimelockProposalCreationTest is Test {
         vm.prank(WALLET);
         uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
 
-        // Key assertion: result must be 0 for EntryPoint to not revert
-        assertEq(result, 0, "TOB-KERNEL-1 FIX: Proposal creation MUST return 0 for state persistence");
+        // Result must be 0 for EntryPoint to not revert
+        assertEq(result, 0, "Proposal creation must return 0 for state persistence");
 
         // Verify the proposal was actually created and persisted
         (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 validUntil) =
@@ -1069,9 +1062,8 @@ contract TimelockProposalCreationTest is Test {
         assertGt(validUntil, validAfter, "validUntil should be after validAfter");
     }
 
-    function test_GivenAttackerTriesToCancelAnotherAccountsProposal() external whenTestingTOBKERNEL1SecurityFix {
+    function test_GivenAttackerTriesToCancelAnotherAccountsProposal() external whenTestingSecurityScenarios {
         // it should revert with OnlyAccount
-        // Security: Only the account owner can cancel their proposals
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 nonce = 1800;
 

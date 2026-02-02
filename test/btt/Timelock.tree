@@ -1,4 +1,4 @@
-TimelockProposalCreationTest
+TimelockTest
 ├── when calling onInstall
 │   ├── given delay and expiration are valid
 │   │   ├── it should store the config
@@ -133,7 +133,7 @@ TimelockProposalCreationTest
 │       └── it should not be detected as noop
 ├── when packing validation data
 │   └── it should correctly pack validAfter and validUntil
-└── when testing TOB KERNEL 1 security fix
+└── when testing security scenarios
     ├── given attacker tries to execute without proposal
     │   └── it should return SIG_VALIDATION_FAILED
     ├── given attacker tries to execute immediately after creation
