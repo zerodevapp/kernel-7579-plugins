@@ -45,5 +45,17 @@ ECDSASignerBTTTest
 │   └── it should return true
 ├── when calling validateSignatureWithDataWithSender with valid eth signed message hash
 │   └── it should return true
-└── when calling validateSignatureWithDataWithSender with invalid signature
-    └── it should return false
+├── when calling validateSignatureWithDataWithSender with invalid signature
+│   └── it should return false
+├── when calling checkUserOpSignature with signer installed and signature returns success via first branch
+│   └── it should return SIG_VALIDATION_SUCCESS_UINT via raw hash match
+├── when calling checkUserOpSignature with signer installed and signature returns success via second branch
+│   └── it should return SIG_VALIDATION_SUCCESS_UINT via eth hash match
+├── when calling checkUserOpSignature with signer installed and signature fails both branches
+│   └── it should return SIG_VALIDATION_FAILED_UINT after checking both hashes
+├── when calling checkSignature with signer installed and signature returns success via first branch
+│   └── it should return ERC1271_MAGICVALUE via raw hash match
+├── when calling checkSignature with signer installed and signature returns success via second branch
+│   └── it should return ERC1271_MAGICVALUE via eth hash match
+└── when calling checkSignature with signer installed and signature fails both branches
+    └── it should return ERC1271_INVALID after checking both hashes

@@ -165,7 +165,9 @@ contract ECDSASignerBTTTest is Test {
 
         vm.prank(wallet);
         uint256 result = ecdsaSigner.checkUserOpSignature(signerId, userOp, userOpHash);
-        assertEq(result, SIG_VALIDATION_FAILED_UINT, "Should return SIG_VALIDATION_FAILED_UINT when signer not installed");
+        assertEq(
+            result, SIG_VALIDATION_FAILED_UINT, "Should return SIG_VALIDATION_FAILED_UINT when signer not installed"
+        );
     }
 
     function test_WhenCallingCheckUserOpSignatureWithValidRawHashSignature() external {
@@ -178,7 +180,11 @@ contract ECDSASignerBTTTest is Test {
 
         vm.prank(wallet);
         uint256 result = ecdsaSigner.checkUserOpSignature(signerId, userOp, userOpHash);
-        assertEq(result, SIG_VALIDATION_SUCCESS_UINT, "Should return SIG_VALIDATION_SUCCESS_UINT for valid raw hash signature");
+        assertEq(
+            result,
+            SIG_VALIDATION_SUCCESS_UINT,
+            "Should return SIG_VALIDATION_SUCCESS_UINT for valid raw hash signature"
+        );
     }
 
     function test_WhenCallingCheckUserOpSignatureWithValidEthSignedMessageHash() external {
@@ -191,7 +197,11 @@ contract ECDSASignerBTTTest is Test {
 
         vm.prank(wallet);
         uint256 result = ecdsaSigner.checkUserOpSignature(signerId, userOp, userOpHash);
-        assertEq(result, SIG_VALIDATION_SUCCESS_UINT, "Should return SIG_VALIDATION_SUCCESS_UINT for valid eth signed message hash");
+        assertEq(
+            result,
+            SIG_VALIDATION_SUCCESS_UINT,
+            "Should return SIG_VALIDATION_SUCCESS_UINT for valid eth signed message hash"
+        );
     }
 
     function test_WhenCallingCheckUserOpSignatureWithInvalidSignature() external {
@@ -325,5 +335,112 @@ contract ECDSASignerBTTTest is Test {
 
         bool result = ecdsaSigner.validateSignatureWithDataWithSender(sender, testHash, sig, data);
         assertFalse(result, "Should return false for invalid signature");
+    }
+
+    function test_WhenCallingCheckUserOpSignatureWithSignerInstalledAndSignatureReturnsSuccessViaFirstBranch()
+        external
+    {
+        // it should return SIG_VALIDATION_SUCCESS_UINT via raw hash match
+        // This tests the first branch: if (_signer == ECDSA.tryRecoverCalldata(hash, sig)) return true;
+        _installSigner();
+
+        PackedUserOperation memory userOp = _createUserOp();
+        bytes32 userOpHash = ENTRYPOINT.getUserOpHash(userOp);
+        // Sign the raw hash directly - this should match in the first branch
+        userOp.signature = _signRawHash(userOpHash, ownerKey);
+
+        vm.prank(wallet);
+        uint256 result = ecdsaSigner.checkUserOpSignature(signerId, userOp, userOpHash);
+        assertEq(
+            result,
+            SIG_VALIDATION_SUCCESS_UINT,
+            "Should return SIG_VALIDATION_SUCCESS_UINT via raw hash match (first branch)"
+        );
+    }
+
+    function test_WhenCallingCheckUserOpSignatureWithSignerInstalledAndSignatureReturnsSuccessViaSecondBranch()
+        external
+    {
+        // it should return SIG_VALIDATION_SUCCESS_UINT via eth hash match
+        // This tests the second branch: first branch fails, then checks eth signed message hash
+        _installSigner();
+
+        PackedUserOperation memory userOp = _createUserOp();
+        bytes32 userOpHash = ENTRYPOINT.getUserOpHash(userOp);
+        // Sign the eth signed message hash - first branch will fail, second branch will succeed
+        userOp.signature = _signEthSignedMessageHash(userOpHash, ownerKey);
+
+        vm.prank(wallet);
+        uint256 result = ecdsaSigner.checkUserOpSignature(signerId, userOp, userOpHash);
+        assertEq(
+            result,
+            SIG_VALIDATION_SUCCESS_UINT,
+            "Should return SIG_VALIDATION_SUCCESS_UINT via eth hash match (second branch)"
+        );
+    }
+
+    function test_WhenCallingCheckUserOpSignatureWithSignerInstalledAndSignatureFailsBothBranches() external {
+        // it should return SIG_VALIDATION_FAILED_UINT after checking both hashes
+        // This tests when both branches fail: raw hash doesn't match AND eth signed hash doesn't match
+        _installSigner();
+
+        PackedUserOperation memory userOp = _createUserOp();
+        bytes32 userOpHash = ENTRYPOINT.getUserOpHash(userOp);
+
+        // Create a different keypair to sign - the recovered address won't match owner
+        (, uint256 differentKey) = makeAddrAndKey("different");
+        userOp.signature = _signRawHash(userOpHash, differentKey);
+
+        vm.prank(wallet);
+        uint256 result = ecdsaSigner.checkUserOpSignature(signerId, userOp, userOpHash);
+        assertEq(
+            result,
+            SIG_VALIDATION_FAILED_UINT,
+            "Should return SIG_VALIDATION_FAILED_UINT after both branches fail"
+        );
+    }
+
+    function test_WhenCallingCheckSignatureWithSignerInstalledAndSignatureReturnsSuccessViaFirstBranch() external {
+        // it should return ERC1271_MAGICVALUE via raw hash match
+        // This tests the first branch: if (_signer == ECDSA.tryRecoverCalldata(hash, sig)) return true;
+        _installSigner();
+
+        bytes32 testHash = keccak256(abi.encodePacked("TEST_HASH"));
+        // Sign the raw hash directly - this should match in the first branch
+        bytes memory sig = _signRawHash(testHash, ownerKey);
+
+        vm.prank(wallet);
+        bytes4 result = ecdsaSigner.checkSignature(signerId, address(0), testHash, sig);
+        assertEq(result, ERC1271_MAGICVALUE, "Should return ERC1271_MAGICVALUE via raw hash match (first branch)");
+    }
+
+    function test_WhenCallingCheckSignatureWithSignerInstalledAndSignatureReturnsSuccessViaSecondBranch() external {
+        // it should return ERC1271_MAGICVALUE via eth hash match
+        // This tests the second branch: first branch fails, then checks eth signed message hash
+        _installSigner();
+
+        bytes32 testHash = keccak256(abi.encodePacked("TEST_HASH"));
+        // Sign the eth signed message hash - first branch will fail, second branch will succeed
+        bytes memory sig = _signEthSignedMessageHash(testHash, ownerKey);
+
+        vm.prank(wallet);
+        bytes4 result = ecdsaSigner.checkSignature(signerId, address(0), testHash, sig);
+        assertEq(result, ERC1271_MAGICVALUE, "Should return ERC1271_MAGICVALUE via eth hash match (second branch)");
+    }
+
+    function test_WhenCallingCheckSignatureWithSignerInstalledAndSignatureFailsBothBranches() external {
+        // it should return ERC1271_INVALID after checking both hashes
+        // This tests when both branches fail: raw hash doesn't match AND eth signed hash doesn't match
+        _installSigner();
+
+        bytes32 testHash = keccak256(abi.encodePacked("TEST_HASH"));
+
+        // Create a different keypair to sign - the recovered address won't match owner
+        (, uint256 differentKey) = makeAddrAndKey("different");
+        bytes memory sig = _signRawHash(testHash, differentKey);
+
+        vm.prank(wallet);
+        bytes4 result = ecdsaSigner.checkSignature(signerId, address(0), testHash, sig);
+        assertEq(result, ERC1271_INVALID, "Should return ERC1271_INVALID after both branches fail");
     }
 }

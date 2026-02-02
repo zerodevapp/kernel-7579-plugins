@@ -54,5 +54,17 @@ ECDSAValidatorBTTTest
 │   └── it should revert with sender is not owner
 ├── when calling preCheck with msgSender as the owner
 │   └── it should return empty bytes
-└── when calling postCheck with any hookData
-    └── it should complete without reverting
+├── when calling postCheck with any hookData
+│   └── it should complete without reverting
+├── when calling validateUserOp with signature matching via first branch
+│   └── it should return SIG_VALIDATION_SUCCESS_UINT via raw hash match
+├── when calling validateUserOp with signature matching via second branch
+│   └── it should return SIG_VALIDATION_SUCCESS_UINT via eth hash match
+├── when calling validateUserOp with signature failing both branches
+│   └── it should return SIG_VALIDATION_FAILED_UINT after checking both hashes
+├── when calling isValidSignatureWithSender with signature matching via first branch
+│   └── it should return ERC1271_MAGICVALUE via raw hash match
+├── when calling isValidSignatureWithSender with signature matching via second branch
+│   └── it should return ERC1271_MAGICVALUE via eth hash match
+└── when calling isValidSignatureWithSender with signature failing both branches
+    └── it should return ERC1271_INVALID after checking both hashes
