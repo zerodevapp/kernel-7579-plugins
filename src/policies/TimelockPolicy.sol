@@ -29,12 +29,14 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
     struct TimelockConfig {
         uint48 delay; // Timelock delay in seconds
         uint48 expirationPeriod; // How long after validAfter the proposal remains valid
+        uint48 gracePeriod; // Period after validAfter during which only owner can execute/cancel
         bool initialized;
     }
 
     struct Proposal {
         ProposalStatus status;
-        uint48 validAfter; // Timestamp when proposal becomes executable
+        uint48 validAfter; // Timestamp when timelock passes (grace period starts)
+        uint48 graceEnd; // Timestamp when grace period ends (public execution allowed)
         uint48 validUntil; // Timestamp when proposal expires
         uint256 epoch; // Epoch when proposal was created
     }
@@ -57,10 +59,13 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
     event ProposalCancelled(address indexed wallet, bytes32 indexed id, bytes32 indexed proposalHash);
 
-    event TimelockConfigUpdated(address indexed wallet, bytes32 indexed id, uint256 delay, uint256 expirationPeriod);
+    event TimelockConfigUpdated(
+        address indexed wallet, bytes32 indexed id, uint256 delay, uint256 expirationPeriod, uint256 gracePeriod
+    );
 
     error InvalidDelay();
     error InvalidExpirationPeriod();
+    error InvalidGracePeriod();
     error ProposalNotFound();
     error ProposalAlreadyExists();
     error TimelockNotExpired(uint256 validAfter, uint256 currentTime);
@@ -72,10 +77,10 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
     /**
      * @notice Install the timelock policy
-     * @param _data Encoded: (uint48 delay, uint48 expirationPeriod)
+     * @param _data Encoded: (uint48 delay, uint48 expirationPeriod, uint48 gracePeriod)
      */
     function _policyOninstall(bytes32 id, bytes calldata _data) internal override {
-        (uint48 delay, uint48 expirationPeriod) = abi.decode(_data, (uint48, uint48));
+        (uint48 delay, uint48 expirationPeriod, uint48 gracePeriod) = abi.decode(_data, (uint48, uint48, uint48));
 
         if (timelockConfig[id][msg.sender].initialized) {
             revert IModule.AlreadyInitialized(msg.sender);
@@ -83,8 +88,9 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
         if (delay == 0) revert InvalidDelay();
         if (expirationPeriod == 0) revert InvalidExpirationPeriod();
-        // Prevent uint48 overflow in createProposal: uint48(block.timestamp) + delay + expirationPeriod
-        if (uint256(delay) + uint256(expirationPeriod) > type(uint48).max - block.timestamp) {
+        if (gracePeriod == 0) revert InvalidGracePeriod();
+        // Prevent uint48 overflow in createProposal: uint48(block.timestamp) + delay + gracePeriod + expirationPeriod
+        if (uint256(delay) + uint256(gracePeriod) + uint256(expirationPeriod) > type(uint48).max - block.timestamp) {
             revert ParametersTooLarge();
         }
 
@@ -92,9 +98,9 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         currentEpoch[id][msg.sender]++;
 
         timelockConfig[id][msg.sender] =
-            TimelockConfig({delay: delay, expirationPeriod: expirationPeriod, initialized: true});
+            TimelockConfig({delay: delay, expirationPeriod: expirationPeriod, gracePeriod: gracePeriod, initialized: true});
 
-        emit TimelockConfigUpdated(msg.sender, id, delay, expirationPeriod);
+        emit TimelockConfigUpdated(msg.sender, id, delay, expirationPeriod, gracePeriod);
     }
 
     /**
@@ -130,8 +136,12 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         if (!config.initialized) revert IModule.NotInitialized(account);
 
         // Calculate proposal timing
+        // validAfter: when timelock passes (grace period starts)
+        // graceEnd: when grace period ends (public execution allowed)
+        // validUntil: when proposal expires
         uint48 validAfter = uint48(block.timestamp) + config.delay;
-        uint48 validUntil = validAfter + config.expirationPeriod;
+        uint48 graceEnd = validAfter + config.gracePeriod;
+        uint48 validUntil = graceEnd + config.expirationPeriod;
 
         // Create userOp key for storage lookup
         bytes32 userOpKey = keccak256(abi.encode(account, keccak256(callData), nonce));
@@ -143,7 +153,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
         // Create proposal (stored by userOpKey) with current epoch
         proposals[userOpKey][id][account] =
-            Proposal({status: ProposalStatus.Pending, validAfter: validAfter, validUntil: validUntil, epoch: currentEpoch[id][account]});
+            Proposal({status: ProposalStatus.Pending, validAfter: validAfter, graceEnd: graceEnd, validUntil: validUntil, epoch: currentEpoch[id][account]});
 
         emit ProposalCreated(account, id, userOpKey, validAfter, validUntil);
     }
@@ -219,7 +229,8 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
         // Calculate proposal timing
         uint48 validAfter = uint48(block.timestamp) + config.delay;
-        uint48 validUntil = validAfter + config.expirationPeriod;
+        uint48 graceEnd = validAfter + config.gracePeriod;
+        uint48 validUntil = graceEnd + config.expirationPeriod;
 
         // Create userOp key for storage lookup (using PROPOSAL calldata and nonce, not current userOp)
         bytes32 userOpKey = keccak256(abi.encode(userOp.sender, keccak256(proposalCallData), proposalNonce));
@@ -231,7 +242,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
         // Create proposal with current epoch
         proposals[userOpKey][id][account] =
-            Proposal({status: ProposalStatus.Pending, validAfter: validAfter, validUntil: validUntil, epoch: currentEpoch[id][account]});
+            Proposal({status: ProposalStatus.Pending, validAfter: validAfter, graceEnd: graceEnd, validUntil: validUntil, epoch: currentEpoch[id][account]});
 
         emit ProposalCreated(account, id, userOpKey, validAfter, validUntil);
 
@@ -242,6 +253,8 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
     /**
      * @notice Handle proposal execution from userOp
+     * @dev Returns graceEnd as validAfter to prevent execution during grace period.
+     *      This gives the owner time to cancel proposals without race conditions.
      */
     function _handleProposalExecutionInternal(bytes32 id, PackedUserOperation calldata userOp, address account)
         internal
@@ -263,8 +276,9 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
         emit ProposalExecuted(account, id, userOpKey);
 
-        // Return validAfter and validUntil for EntryPoint to validate timing
-        return _packValidationData(proposal.validAfter, proposal.validUntil);
+        // Return graceEnd (not validAfter) as the earliest execution time
+        // This prevents race conditions by ensuring the owner has a grace period to cancel
+        return _packValidationData(proposal.graceEnd, proposal.validUntil);
     }
 
     /**
@@ -433,17 +447,18 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
      * @param id The policy ID
      * @param wallet The wallet address
      * @return status The proposal status
-     * @return validAfter When the proposal becomes valid
+     * @return validAfter When the timelock passes (grace period starts)
+     * @return graceEnd When the grace period ends (public execution allowed)
      * @return validUntil When the proposal expires
      */
     function getProposal(address account, bytes calldata callData, uint256 nonce, bytes32 id, address wallet)
         external
         view
-        returns (ProposalStatus status, uint256 validAfter, uint256 validUntil)
+        returns (ProposalStatus status, uint256 validAfter, uint256 graceEnd, uint256 validUntil)
     {
         bytes32 userOpKey = keccak256(abi.encode(account, keccak256(callData), nonce));
         Proposal storage proposal = proposals[userOpKey][id][wallet];
-        return (proposal.status, proposal.validAfter, proposal.validUntil);
+        return (proposal.status, proposal.validAfter, proposal.graceEnd, proposal.validUntil);
     }
 
     /**
