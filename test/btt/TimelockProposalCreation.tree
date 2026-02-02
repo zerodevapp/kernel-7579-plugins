@@ -1,0 +1,146 @@
+TimelockProposalCreationTest
+├── when calling onInstall
+│   ├── given delay and expiration are valid
+│   │   ├── it should store the config
+│   │   └── it should emit TimelockConfigUpdated
+│   ├── given already initialized
+│   │   └── it should revert with AlreadyInitialized
+│   ├── given delay is zero
+│   │   └── it should revert with InvalidDelay
+│   └── given expiration is zero
+│       └── it should revert with InvalidExpirationPeriod
+├── when calling onUninstall
+│   ├── given initialized
+│   │   └── it should clear the config
+│   └── given not initialized
+│       └── it should revert with NotInitialized
+├── when calling isModuleType
+│   ├── given type is policy
+│   │   └── it should return true
+│   ├── given type is stateless validator
+│   │   └── it should return true
+│   ├── given type is stateless validator with sender
+│   │   └── it should return true
+│   └── given type is invalid
+│       └── it should return false
+├── when calling createProposal
+│   ├── given config is initialized and proposal does not exist
+│   │   ├── it should store the proposal with pending status
+│   │   ├── it should set correct validAfter and validUntil
+│   │   └── it should emit ProposalCreated
+│   ├── given not initialized
+│   │   └── it should revert with NotInitialized
+│   └── given proposal already exists
+│       └── it should revert with ProposalAlreadyExists
+├── when calling cancelProposal
+│   ├── given caller is account and proposal is pending
+│   │   ├── it should set status to cancelled
+│   │   └── it should emit ProposalCancelled
+│   ├── given caller is not account
+│   │   └── it should revert with OnlyAccount
+│   ├── given not initialized
+│   │   └── it should revert with NotInitialized
+│   ├── given proposal does not exist
+│   │   └── it should revert with ProposalNotPending
+│   └── given proposal is already cancelled
+│       └── it should revert with ProposalNotPending
+├── when calling checkUserOpPolicy to create proposal
+│   ├── given noop calldata and valid signature
+│   │   ├── it should create the proposal
+│   │   ├── it should return zero for state persistence
+│   │   └── it should emit ProposalCreated
+│   ├── given noop calldata and signature shorter than 65 bytes
+│   │   └── it should return SIG_VALIDATION_FAILED
+│   ├── given noop calldata and signature claims more data than available
+│   │   └── it should return SIG_VALIDATION_FAILED
+│   └── given noop calldata and proposal already exists
+│       └── it should return SIG_VALIDATION_FAILED
+├── when calling checkUserOpPolicy to execute proposal
+│   ├── given proposal is pending and timelock passed
+│   │   ├── it should mark proposal as executed
+│   │   ├── it should return packed validation data with timing
+│   │   └── it should emit ProposalExecuted
+│   ├── given no proposal exists
+│   │   └── it should return SIG_VALIDATION_FAILED
+│   ├── given proposal is cancelled
+│   │   └── it should return SIG_VALIDATION_FAILED
+│   └── given proposal is already executed
+│       └── it should return SIG_VALIDATION_FAILED
+├── when calling checkUserOpPolicy without initialization
+│   └── it should return SIG_VALIDATION_FAILED
+├── when calling checkSignaturePolicy
+│   ├── given initialized
+│   │   └── it should return zero
+│   └── given not initialized
+│       └── it should return one
+├── when calling validateSignatureWithData
+│   ├── given delay and expiration are nonzero
+│   │   └── it should return true
+│   ├── given delay is zero
+│   │   └── it should return false
+│   └── given expiration is zero
+│       └── it should return false
+├── when calling validateSignatureWithDataWithSender
+│   ├── given delay and expiration are nonzero
+│   │   └── it should return true
+│   ├── given delay is zero
+│   │   └── it should return false
+│   └── given expiration is zero
+│       └── it should return false
+├── when calling getProposal
+│   ├── given proposal exists
+│   │   └── it should return status validAfter and validUntil
+│   └── given proposal does not exist
+│       └── it should return None status and zeros
+├── when calling computeUserOpKey
+│   └── it should match manual keccak256 computation
+├── when detecting noop calldata
+│   ├── given calldata is empty
+│   │   └── it should be detected as noop
+│   ├── given calldata is shorter than 4 bytes
+│   │   └── it should not be detected as noop
+│   └── given selector is unrecognized
+│       └── it should not be detected as noop
+├── when detecting ERC7579 execute noop
+│   ├── given target is self and value is zero and inner calldata is empty
+│   │   └── it should be detected as noop
+│   ├── given target is zero address and value is zero and inner calldata is empty
+│   │   └── it should be detected as noop
+│   ├── given calldata is shorter than 68 bytes
+│   │   └── it should not be detected as noop
+│   ├── given offset is not 32
+│   │   └── it should not be detected as noop
+│   ├── given calldata is shorter than 100 bytes
+│   │   └── it should not be detected as noop
+│   ├── given exec data length is less than 52
+│   │   └── it should not be detected as noop
+│   ├── given target is not self or zero
+│   │   └── it should not be detected as noop
+│   ├── given value is nonzero
+│   │   └── it should not be detected as noop
+│   ├── given calldata is shorter than 184 bytes
+│   │   └── it should not be detected as noop
+│   └── given inner calldata length is nonzero
+│       └── it should not be detected as noop
+├── when detecting executeUserOp noop
+│   ├── given userOp data is empty
+│   │   └── it should be detected as noop
+│   ├── given calldata is shorter than 100 bytes
+│   │   └── it should not be detected as noop
+│   ├── given offset is not 32
+│   │   └── it should not be detected as noop
+│   └── given userOp length is nonzero
+│       └── it should not be detected as noop
+├── when packing validation data
+│   └── it should correctly pack validAfter and validUntil
+└── when testing TOB KERNEL 1 security fix
+    ├── given attacker tries to execute without proposal
+    │   └── it should return SIG_VALIDATION_FAILED
+    ├── given attacker tries to execute immediately after creation
+    │   └── it should return packed data with future validAfter
+    ├── given attacker tries to reexecute a used proposal
+    │   └── it should return SIG_VALIDATION_FAILED
+    ├── given proposal creation returns zero
+    │   └── it should allow state to persist via EntryPoint
+    └── given attacker tries to cancel another accounts proposal
+        └── it should revert with OnlyAccount

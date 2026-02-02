@@ -284,7 +284,7 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         uint256 result = policyModule.checkUserOpPolicy(policyId(), userOp);
         vm.stopPrank();
 
-        // Returns success with validUntil=0 (expired) - state persists but execution fails
+        // Returns success (validationData = 0) - valid indefinitely per ERC-4337
         // This allows proposal creation via UserOp without external caller
         assertEq(result, 0);
 
