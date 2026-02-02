@@ -1,0 +1,19 @@
+WeightedECDSAGasGriefingTest
+├── when signature count exceeds MAX_SIGNATURES
+│   └── it should return SIG_VALIDATION_FAILED_UINT
+├── when signature count equals MAX_SIGNATURES with valid guardians
+│   └── it should return SIG_VALIDATION_SUCCESS_UINT
+├── when signature count equals MAX_SIGNATURES with non-guardians
+│   └── it should return SIG_VALIDATION_FAILED_UINT when threshold not met
+├── when signature count is less than MAX_SIGNATURES
+│   └── it should validate normally and succeed when threshold met
+├── when signature count is zero
+│   └── it should return SIG_VALIDATION_FAILED_UINT
+├── when signature length is not a multiple of 65
+│   └── it should return SIG_VALIDATION_FAILED_UINT
+├── when ERC1271 signature count exceeds MAX_SIGNATURES
+│   └── it should return ERC1271_INVALID
+├── when signer has zero weight in guardian storage
+│   └── it should not contribute to threshold accumulation
+└── when multiple zero-weight signers are provided
+    └── it should fail to meet threshold
