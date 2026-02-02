@@ -35,6 +35,9 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
     bytes32 private constant PROPOSAL_TYPEHASH =
         keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce)");
 
+    // Maximum number of signatures to process (prevents gas griefing)
+    uint256 private constant MAX_SIGNATURES = 10;
+
     mapping(bytes32 id => mapping(address kernel => WeightedECDSASignerStorage)) public weightedStorage;
     mapping(address guardian => mapping(bytes32 id => mapping(address kernel => GuardianStorage))) public guardian;
 
@@ -161,7 +164,9 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         }
 
         uint256 sigCount = sig.length / 65;
-        require(sigCount > 0, "No sig");
+        if (sigCount == 0 || sigCount > MAX_SIGNATURES) {
+            return SIG_VALIDATION_FAILED_UINT;
+        }
 
         uint256 totalWeight = 0;
         uint256 threshold = strg.threshold;
@@ -215,7 +220,7 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         }
 
         uint256 sigCount = sig.length / 65;
-        if (sigCount == 0) {
+        if (sigCount == 0 || sigCount > MAX_SIGNATURES) {
             return ERC1271_INVALID;
         }
 
@@ -253,7 +258,7 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         }
 
         uint256 sigCount = sig.length / 65;
-        if (sigCount == 0) {
+        if (sigCount == 0 || sigCount > MAX_SIGNATURES) {
             return false;
         }
 
