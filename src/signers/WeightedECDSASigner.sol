@@ -186,9 +186,16 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
             }
         }
 
-        // Last signature verifies userOpHash (exempt from ordering requirement)
+        // Last signature verifies userOpHash
         // NOTE: use this with ep > 0.7 only, for ep <= 0.7, need to use toEthSignedMessageHash
         signer = ECDSA.tryRecoverCalldata(userOpHash, sig[sig.length - 65:]);
+
+        // Enforce sorted order for last signer to prevent double-counting
+        // (same guardian signing both proposalHash and userOpHash)
+        if (signer <= lastSigner) {
+            return SIG_VALIDATION_FAILED_UINT;
+        }
+
         uint24 lastWeight = guardian[signer][id][account].weight;
         if (lastWeight > 0) {
             totalWeight += lastWeight;
