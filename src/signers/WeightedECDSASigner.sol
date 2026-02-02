@@ -172,14 +172,19 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         address signer;
         address lastSigner = address(0);
 
+        // Track proposalHash signers to prevent double-counting with userOpHash signer
+        address[] memory proposalSigners = new address[](sigCount - 1);
+
         // Process all signatures except the last one (they sign proposalHash)
         // Signers must be in strictly ascending order to prevent reuse
+        // NOTE: No early return - must always verify userOpHash signature
         for (uint256 i = 0; i < sigCount - 1; i++) {
             signer = ECDSA.tryRecoverCalldata(proposalHash, sig[i * 65:(i + 1) * 65]);
 
             // Enforce sorted order to prevent signature reuse
             require(signer > lastSigner, "Signers not sorted");
             lastSigner = signer;
+            proposalSigners[i] = signer;
 
             uint24 guardianWeight = guardian[signer][id][account].weight;
             // Revert if non-last signer has zero weight (prevents gas griefing)
@@ -187,20 +192,34 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
                 revert ZeroWeightSigner();
             }
             totalWeight += guardianWeight;
-            if (totalWeight >= threshold) {
-                return SIG_VALIDATION_SUCCESS_UINT;
-            }
+            // No early return here - must verify userOpHash signature
         }
 
-        // Last signature verifies userOpHash (exempt from ordering requirement)
+        // Last signature MUST verify userOpHash to bind the full userOp
+        // This prevents malleability of gas fields and other userOp parameters
         // NOTE: use this with ep > 0.7 only, for ep <= 0.7, need to use toEthSignedMessageHash
         signer = ECDSA.tryRecoverCalldata(userOpHash, sig[sig.length - 65:]);
+
         uint24 lastWeight = guardian[signer][id][account].weight;
         // If last signer has zero weight, return validation failed (don't revert)
         if (lastWeight == 0) {
             return SIG_VALIDATION_FAILED_UINT;
         }
-        totalWeight += lastWeight;
+
+        // Check if userOpHash signer already signed proposalHash (prevent double-counting)
+        bool alreadySigned = false;
+        for (uint256 i = 0; i < proposalSigners.length; i++) {
+            if (proposalSigners[i] == signer) {
+                alreadySigned = true;
+                break;
+            }
+        }
+
+        // Only add weight if signer hasn't already contributed via proposalHash
+        if (!alreadySigned) {
+            totalWeight += lastWeight;
+        }
+
         if (totalWeight >= threshold) {
             return SIG_VALIDATION_SUCCESS_UINT;
         }
