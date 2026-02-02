@@ -284,8 +284,9 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         uint256 result = policyModule.checkUserOpPolicy(policyId(), userOp);
         vm.stopPrank();
 
-        // Should return failure (1) because this was proposal creation, not execution
-        assertEq(result, 1);
+        // Returns success with validUntil=0 (expired) - state persists but execution fails
+        // This allows proposal creation via UserOp without external caller
+        assertEq(result, 0);
 
         // Verify proposal was created
         (TimelockPolicy.ProposalStatus status,,) =

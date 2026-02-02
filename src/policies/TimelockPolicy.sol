@@ -225,8 +225,9 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
         emit ProposalCreated(account, id, userOpKey, validAfter, validUntil);
 
-        // Return failure to prevent execution (this was just proposal creation)
-        return SIG_VALIDATION_FAILED_UINT;
+        // Return success with validUntil=0 to persist storage but prevent execution
+        // EntryPoint will reject because block.timestamp > 0 (validUntil)
+        return _packValidationData(0, 0);
     }
 
     /**
