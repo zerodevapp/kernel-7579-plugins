@@ -10,10 +10,7 @@ import {
     MODULE_TYPE_POLICY,
     MODULE_TYPE_STATELESS_VALIDATOR,
     MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER,
-    SIG_VALIDATION_SUCCESS_UINT,
-    SIG_VALIDATION_FAILED_UINT,
-    ERC1271_MAGICVALUE,
-    ERC1271_INVALID
+    SIG_VALIDATION_FAILED_UINT
 } from "src/types/Constants.sol";
 
 /**
@@ -48,9 +45,6 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
     // userOpKey = keccak256(abi.encode(account, keccak256(callData), nonce))
     mapping(bytes32 => mapping(bytes32 => mapping(address => Proposal))) public proposals;
 
-    // Storage for ERC-1271 signature proposals: hash => id => wallet => proposal
-    mapping(bytes32 => mapping(bytes32 => mapping(address => Proposal))) public signatureProposals;
-
     event ProposalCreated(
         address indexed wallet, bytes32 indexed id, bytes32 indexed proposalHash, uint256 validAfter, uint256 validUntil
     );
@@ -58,14 +52,6 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
     event ProposalExecuted(address indexed wallet, bytes32 indexed id, bytes32 indexed proposalHash);
 
     event ProposalCancelled(address indexed wallet, bytes32 indexed id, bytes32 indexed proposalHash);
-
-    event SignatureProposalCreated(
-        address indexed wallet, bytes32 indexed id, bytes32 indexed hash, uint256 validAfter, uint256 validUntil
-    );
-
-    event SignatureProposalExecuted(address indexed wallet, bytes32 indexed id, bytes32 indexed hash);
-
-    event SignatureProposalCancelled(address indexed wallet, bytes32 indexed id, bytes32 indexed hash);
 
     event TimelockConfigUpdated(address indexed wallet, bytes32 indexed id, uint256 delay, uint256 expirationPeriod);
 
@@ -175,57 +161,6 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         proposal.status = ProposalStatus.Cancelled;
 
         emit ProposalCancelled(account, id, userOpKey);
-    }
-
-    /**
-     * @notice Create a proposal for time-delayed ERC-1271 signature
-     * @dev Anyone can create a proposal - the timelock delay provides the security
-     * @param id The policy ID
-     * @param account The account address
-     * @param hash The hash that will be signed
-     */
-    function createSignatureProposal(bytes32 id, address account, bytes32 hash) external {
-        TimelockConfig storage config = timelockConfig[id][account];
-        if (!config.initialized) revert IModule.NotInitialized(account);
-
-        // Calculate proposal timing
-        uint48 validAfter = uint48(block.timestamp) + config.delay;
-        uint48 validUntil = validAfter + config.expirationPeriod;
-
-        // Check proposal doesn't already exist
-        if (signatureProposals[hash][id][account].status != ProposalStatus.None) {
-            revert ProposalAlreadyExists();
-        }
-
-        // Create proposal
-        signatureProposals[hash][id][account] =
-            Proposal({status: ProposalStatus.Pending, validAfter: validAfter, validUntil: validUntil});
-
-        emit SignatureProposalCreated(account, id, hash, validAfter, validUntil);
-    }
-
-    /**
-     * @notice Cancel a pending signature proposal
-     * @dev Only the account itself can cancel proposals to prevent griefing
-     * @param id The policy ID
-     * @param account The account address
-     * @param hash The hash of the signature proposal
-     */
-    function cancelSignatureProposal(bytes32 id, address account, bytes32 hash) external {
-        // Only the account itself can cancel its own proposals
-        if (msg.sender != account) revert OnlyAccount();
-
-        TimelockConfig storage config = timelockConfig[id][account];
-        if (!config.initialized) revert IModule.NotInitialized(account);
-
-        Proposal storage proposal = signatureProposals[hash][id][account];
-        if (proposal.status != ProposalStatus.Pending) {
-            revert ProposalNotPending();
-        }
-
-        proposal.status = ProposalStatus.Cancelled;
-
-        emit SignatureProposalCancelled(account, id, hash);
     }
 
     /**
@@ -396,7 +331,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
      * @notice Check if executeUserOp call is a no-op
      * @dev Valid: executeUserOp("", bytes32)
      */
-    function _isNoOpExecuteUserOp(bytes calldata callData) internal view returns (bool) {
+    function _isNoOpExecuteUserOp(bytes calldata callData) internal pure returns (bool) {
         // executeUserOp(bytes calldata userOp, bytes32 userOpHash)
         // Format: 4 (selector) + 32 (userOp offset) + 32 (userOpHash) + 32 (userOp length) + userOp data
         if (callData.length < 100) return false;
@@ -430,37 +365,33 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
     /**
      * @notice Check signature against timelock policy (for ERC-1271)
-     * @param id The policy ID
-     * @return validationData 0 if valid, 1 if invalid
+     * @dev TimelockPolicy does not support ERC-1271 signature validation - always reverts
      */
-    function checkSignaturePolicy(bytes32 id, address, bytes32 hash, bytes calldata sig)
+    function checkSignaturePolicy(bytes32, address, bytes32, bytes calldata)
         external
-        view
+        pure
         override
         returns (uint256)
     {
-        bytes4 result = _validateSignaturePolicy(id, msg.sender, hash, sig);
-        return result == ERC1271_MAGICVALUE ? 0 : 1;
+        revert("TimelockPolicy: signature validation not supported");
     }
 
-    function validateSignatureWithData(bytes32, bytes calldata, bytes calldata data)
+    function validateSignatureWithData(bytes32, bytes calldata, bytes calldata)
         external
         pure
         override(IStatelessValidator)
         returns (bool)
     {
-        (uint48 delay, uint48 expirationPeriod) = abi.decode(data, (uint48, uint48));
-        return delay != 0 && expirationPeriod != 0;
+        revert("TimelockPolicy: stateless signature validation not supported");
     }
 
-    function validateSignatureWithDataWithSender(address, bytes32, bytes calldata, bytes calldata data)
+    function validateSignatureWithDataWithSender(address, bytes32, bytes calldata, bytes calldata)
         external
         pure
         override(IStatelessValidatorWithSender)
         returns (bool)
     {
-        (uint48 delay, uint48 expirationPeriod) = abi.decode(data, (uint48, uint48));
-        return delay != 0 && expirationPeriod != 0;
+        revert("TimelockPolicy: stateless signature validation not supported");
     }
 
     // ==================== Internal Shared Logic ====================
@@ -485,56 +416,6 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
         // Otherwise, this is a proposal execution request
         return _handleProposalExecutionInternal(id, userOp, account);
-    }
-
-    /**
-     * @notice Internal function to validate signature policy
-     * @dev Enforces timelock for ERC-1271 signatures - requires a valid proposal
-     */
-    function _validateSignaturePolicy(bytes32 id, address account, bytes32 hash, bytes calldata sig)
-        internal
-        view
-        returns (bytes4)
-    {
-        TimelockConfig storage config = timelockConfig[id][account];
-        if (!config.initialized) return ERC1271_INVALID;
-
-        // Check if there's a valid signature proposal for this hash
-        Proposal storage proposal = signatureProposals[hash][id][account];
-
-        // Proposal must exist and be pending
-        if (proposal.status != ProposalStatus.Pending) {
-            return ERC1271_INVALID;
-        }
-
-        // Check timing constraints
-        if (block.timestamp < proposal.validAfter) {
-            return ERC1271_INVALID; // Timelock not passed
-        }
-
-        if (block.timestamp > proposal.validUntil) {
-            return ERC1271_INVALID; // Proposal expired
-        }
-
-        return ERC1271_MAGICVALUE;
-    }
-
-    /**
-     * @notice Mark a signature proposal as executed (called after successful signature validation)
-     * @dev This should be called by the account after ERC-1271 validation succeeds
-     * @param id The policy ID
-     * @param hash The hash of the signature
-     */
-    function markSignatureProposalExecuted(bytes32 id, bytes32 hash) external {
-        Proposal storage proposal = signatureProposals[hash][id][msg.sender];
-
-        if (proposal.status != ProposalStatus.Pending) {
-            revert ProposalNotPending();
-        }
-
-        proposal.status = ProposalStatus.Executed;
-
-        emit SignatureProposalExecuted(msg.sender, id, hash);
     }
 
     /**
@@ -567,23 +448,5 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
      */
     function computeUserOpKey(address account, bytes calldata callData, uint256 nonce) external pure returns (bytes32) {
         return keccak256(abi.encode(account, keccak256(callData), nonce));
-    }
-
-    /**
-     * @notice Get signature proposal details
-     * @param hash The hash being signed
-     * @param id The policy ID
-     * @param wallet The wallet address
-     * @return status The proposal status
-     * @return validAfter When the proposal becomes valid
-     * @return validUntil When the proposal expires
-     */
-    function getSignatureProposal(bytes32 hash, bytes32 id, address wallet)
-        external
-        view
-        returns (ProposalStatus status, uint256 validAfter, uint256 validUntil)
-    {
-        Proposal storage proposal = signatureProposals[hash][id][wallet];
-        return (proposal.status, proposal.validAfter, proposal.validUntil);
     }
 }

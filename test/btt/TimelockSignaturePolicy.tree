@@ -1,25 +1,9 @@
 TimelockSignaturePolicyTest
-├── when policy is not installed
-│   └── it should return ERC1271_INVALID for signature validation
-├── when creating signature proposal without initialization
-│   └── it should revert with NotInitialized
-├── when creating signature proposal that already exists
-│   └── it should revert with ProposalAlreadyExists
-├── when creating signature proposal successfully
-│   ├── it should store the proposal with Pending status
-│   ├── it should set validAfter to timestamp plus delay
-│   └── it should set validUntil to validAfter plus expiration
-├── when cancelling signature proposal as non-account
-│   └── it should revert with OnlyAccount
-├── when cancelling signature proposal successfully
-│   └── it should set the proposal status to Cancelled
-├── when checking signature without proposal
-│   └── it should return validation failure
-├── when checking signature before timelock passes
-│   └── it should return validation failure
-├── when checking signature after timelock passes
-│   └── it should return validation success
-├── when checking signature after expiration
-│   └── it should return validation failure
-└── when checking signature for cancelled proposal
-    └── it should return validation failure
+├── when checking signature policy
+│   └── it should revert because signature validation is not supported
+├── when checking signature policy without install
+│   └── it should revert because signature validation is not supported
+├── when validating signature with data
+│   └── it should revert because stateless signature validation is not supported
+└── when validating signature with data with sender
+    └── it should revert because stateless signature validation is not supported
