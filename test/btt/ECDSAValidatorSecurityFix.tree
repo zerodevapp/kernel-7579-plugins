@@ -1,0 +1,22 @@
+ECDSAValidatorSecurityFixTest
+├── when installing with data length less than 20 bytes
+│   └── it should revert with InvalidDataLength
+├── when installing with data length greater than 20 bytes
+│   └── it should revert with InvalidDataLength
+├── when installing with exactly 20 bytes but zero address owner
+│   └── it should revert with ZeroAddressOwner
+├── when installing with exactly 20 bytes and valid owner
+│   ├── it should store the owner
+│   └── it should emit OwnerRegistered event
+├── when validating userOp with validator not installed
+│   └── it should return SIG_VALIDATION_FAILED_UINT because owner is zero
+├── when validating userOp with valid owner and valid signature
+│   └── it should return SIG_VALIDATION_SUCCESS_UINT
+├── when validating userOp with valid owner and invalid signature
+│   └── it should return SIG_VALIDATION_FAILED_UINT
+├── when validating signature with validator not installed
+│   └── it should return ERC1271_INVALID because owner is zero
+├── when validating signature with valid owner and valid signature
+│   └── it should return ERC1271_MAGICVALUE
+└── when validating signature with valid owner and invalid signature
+    └── it should return ERC1271_INVALID
