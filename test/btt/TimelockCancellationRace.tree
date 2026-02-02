@@ -1,0 +1,51 @@
+TimelockCancellationRaceTest
+├── when cancelling a proposal
+│   ├── given the proposal is pending
+│   │   ├── it should set proposal status to Cancelled
+│   │   ├── it should emit ProposalCancelled event
+│   │   └── it should prevent execution via checkUserOpPolicy returning failure
+│   ├── given the proposal does not exist
+│   │   └── it should revert with ProposalNotPending
+│   ├── given the proposal is already cancelled
+│   │   └── it should revert with ProposalNotPending
+│   ├── given the proposal is already executed
+│   │   └── it should revert with ProposalNotPending
+│   └── given the caller is not the account
+│       └── it should revert with OnlyAccount
+├── when executing a proposal after cancellation
+│   ├── given the proposal was just cancelled in the same block
+│   │   └── it should return SIG_VALIDATION_FAILED because status is Cancelled
+│   ├── given the cancellation happened in a previous block
+│   │   └── it should return SIG_VALIDATION_FAILED because status is Cancelled
+│   └── given a new proposal is created for the same calldata after cancellation
+│       └── it should allow execution of the new proposal after grace period
+├── when executing a proposal during the grace period
+│   ├── given the timelock delay has passed but grace period has not
+│   │   ├── it should return validation data with graceEnd as validAfter
+│   │   └── it should prevent immediate execution via bundler rejection
+│   └── given the grace period has passed
+│       ├── it should return validation data allowing execution
+│       └── it should set proposal status to Executed
+├── when the owner cancels during grace period
+│   ├── given the proposal is still pending
+│   │   └── it should successfully cancel the proposal
+│   └── given an execution attempt is pending in the mempool
+│       └── it should allow cancellation to win the race
+├── when attempting multiple cancellations
+│   ├── given the proposal was just cancelled
+│   │   └── it should revert with ProposalNotPending on second attempt
+│   └── given trying to cancel twice in the same transaction
+│       └── it should revert with ProposalNotPending on second call
+├── when creating a new proposal after grace period
+│   ├── given the original proposal was cancelled
+│   │   └── it should revert with ProposalAlreadyExists because cancelled proposals persist
+│   └── given the original proposal was executed
+│       └── it should revert with ProposalAlreadyExists because executed proposals persist
+└── when validating grace period timing
+    ├── given delay is 1 day and gracePeriod is 1 hour
+    │   ├── it should set validAfter to current time plus delay
+    │   ├── it should set graceEnd to validAfter plus gracePeriod
+    │   └── it should set validUntil to graceEnd plus expirationPeriod
+    └── given execution validation data is returned
+        ├── it should pack graceEnd not validAfter as execution start time
+        └── it should pack validUntil as expiration time
