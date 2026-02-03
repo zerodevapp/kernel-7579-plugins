@@ -141,7 +141,7 @@ abstract contract SignerTestBase is ModuleTestBase {
         assertTrue(result == 0x1626ba7e); // ERC1271_MAGICVALUE
     }
 
-    function testSignerIsValidSignatureWithSenderFail() public payable {
+    function testSignerIsValidSignatureWithSenderFail() public payable virtual {
         ISigner signerModule = ISigner(address(module));
         vm.startPrank(WALLET);
         signerModule.onInstall(abi.encodePacked(signerId(), installData()));

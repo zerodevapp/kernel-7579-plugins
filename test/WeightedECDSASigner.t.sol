@@ -174,6 +174,52 @@ contract WeightedECDSASignerTest is SignerTestBase, StatelessValidatorTestBase, 
         assertEq(totalWeight, 0);
     }
 
+    // Override base tests - with zero-weight signers that are not last, we now revert
+    function testSignerIsValidSignatureWithSenderFail() public payable override {
+        WeightedECDSASigner signerModule = WeightedECDSASigner(address(module));
+        vm.startPrank(WALLET);
+        signerModule.onInstall(abi.encodePacked(signerId(), installData()));
+        vm.stopPrank();
+
+        bytes32 testHash = keccak256(abi.encodePacked("TEST_HASH"));
+        (, bytes memory signature) = erc1271Signature(testHash, false);
+
+        // With invalid signatures, recovered addresses are non-guardians with zero weight
+        // Since first signer is not last and has zero weight, it should revert
+        vm.startPrank(WALLET);
+        vm.expectRevert(WeightedECDSASigner.ZeroWeightSigner.selector);
+        signerModule.checkSignature(signerId(), address(0), testHash, signature);
+        vm.stopPrank();
+    }
+
+    function testStatlessValidatorFail() external override {
+        WeightedECDSASigner validatorModule = WeightedECDSASigner(address(module));
+
+        bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
+        (, bytes memory sig) = statelessValidationSignature(message, false);
+
+        // With invalid signatures, recovered addresses are non-guardians with zero weight
+        // Since first signer is not last and has zero weight, it should revert
+        vm.startPrank(WALLET);
+        vm.expectRevert(WeightedECDSASigner.ZeroWeightSigner.selector);
+        validatorModule.validateSignatureWithData(message, sig, installData());
+        vm.stopPrank();
+    }
+
+    function testStatelessValidatorWithSenderFail() external override {
+        WeightedECDSASigner validatorModule = WeightedECDSASigner(address(module));
+
+        bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
+        (, bytes memory sig) = statelessValidationSignatureWithSender(message, false);
+
+        // With invalid signatures, recovered addresses are non-guardians with zero weight
+        // Since first signer is not last and has zero weight, it should revert
+        vm.startPrank(WALLET);
+        vm.expectRevert(WeightedECDSASigner.ZeroWeightSigner.selector);
+        validatorModule.validateSignatureWithDataWithSender(address(0), message, sig, installData());
+        vm.stopPrank();
+    }
+
     // Additional tests specific to WeightedECDSASigner
 
     function testWeightedSignatureWithSingleGuardian() public {
