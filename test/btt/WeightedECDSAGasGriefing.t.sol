@@ -83,20 +83,93 @@ contract WeightedECDSAGasGriefingTest is Test {
         return signatures;
     }
 
-    // ============ Test Cases ============
+    function _computeProposalHash(PackedUserOperation memory userOp) internal view returns (bytes32) {
+        bytes32 domainSeparator = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256("WeightedECDSASigner"),
+                keccak256("0.0.2"),
+                block.chainid,
+                address(signer)
+            )
+        );
 
-    function test_WhenNonLastSignerHasZeroWeight() external {
-        // Install 5 guardians with weight
+        return keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                domainSeparator,
+                keccak256(
+                    abi.encode(
+                        keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce)"),
+                        userOp.sender,
+                        SIGNER_ID,
+                        keccak256(userOp.callData),
+                        userOp.nonce
+                    )
+                )
+            )
+        );
+    }
+
+    function _createUserOp() internal pure returns (PackedUserOperation memory) {
+        return PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: abi.encodeWithSignature("execute()"),
+            accountGasLimits: bytes32(0),
+            preVerificationGas: 0,
+            gasFees: bytes32(0),
+            paymasterAndData: "",
+            signature: ""
+        });
+    }
+
+    function _signUserOp(PackedUserOperation memory userOp, uint256 numSigners)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes32 proposalHash = _computeProposalHash(userOp);
+        bytes32 userOpHash = entrypoint.getUserOpHash(userOp);
+
+        bytes memory signatures;
+
+        // Sign proposalHash for all except last signer
+        for (uint256 i = 0; i < numSigners - 1; i++) {
+            (uint8 vi, bytes32 ri, bytes32 si) = vm.sign(guardianKeys[i], proposalHash);
+            signatures = abi.encodePacked(signatures, ri, si, vi);
+        }
+
+        // Last signer signs userOpHash
+        (uint8 vLast, bytes32 rLast, bytes32 sLast) = vm.sign(guardianKeys[numSigners - 1], userOpHash);
+        signatures = abi.encodePacked(signatures, rLast, sLast, vLast);
+
+        return signatures;
+    }
+
+    // ============ ERC1271 Signature Validation Tests ============
+
+    modifier whenValidatingERC1271Signature() {
+        _;
+    }
+
+    function test_WhenNon_lastSignerHasZeroWeight() external whenValidatingERC1271Signature {
         _installSigner(5);
 
         bytes32 testHash = keccak256("test");
 
-        // Create a signature where a non-guardian is NOT the last signer
-        // We'll use: nonGuardian, guardian[0], guardian[1], guardian[2], guardian[3]
-        // But sorted, so nonGuardian could be anywhere except last
-        (address nonGuardian, uint256 nonGuardianKey) = makeAddrAndKey("zeroWeightSignerFirst");
+        // Create a non-guardian with a specific private key that gives a low address
+        // We need an address lower than guardians[4] (the highest guardian we use)
+        uint256 nonGuardianKey = 0x1234567890abcdef;
+        address nonGuardian = vm.addr(nonGuardianKey);
 
-        // Find position where non-guardian fits (must not be last after sorting)
+        // If nonGuardian happens to be higher than all guardians, keep trying different keys
+        while (nonGuardian > guardians[4]) {
+            nonGuardianKey += 1;
+            nonGuardian = vm.addr(nonGuardianKey);
+        }
+
         address[] memory mixedSigners = new address[](5);
         uint256[] memory mixedKeys = new uint256[](5);
 
@@ -117,29 +190,9 @@ contract WeightedECDSAGasGriefingTest is Test {
             }
         }
 
-        // Check if nonGuardian is last - if so, we need a different nonGuardian
-        // For this test, we want nonGuardian to NOT be last
-        // Let's find a non-guardian that sorts before our last guardian
-        bool nonGuardianIsLast = mixedSigners[4] == nonGuardian;
+        // Ensure nonGuardian is not last
+        require(mixedSigners[4] != nonGuardian, "Test setup: nonGuardian should not be last");
 
-        if (nonGuardianIsLast) {
-            // Use a lower address non-guardian
-            (nonGuardian, nonGuardianKey) = makeAddrAndKey("aaa_zeroWeight");
-            mixedSigners[0] = nonGuardian;
-            mixedKeys[0] = nonGuardianKey;
-
-            // Re-sort
-            for (uint256 i = 0; i < 5; i++) {
-                for (uint256 j = i + 1; j < 5; j++) {
-                    if (mixedSigners[i] > mixedSigners[j]) {
-                        (mixedSigners[i], mixedSigners[j]) = (mixedSigners[j], mixedSigners[i]);
-                        (mixedKeys[i], mixedKeys[j]) = (mixedKeys[j], mixedKeys[i]);
-                    }
-                }
-            }
-        }
-
-        // Create signatures
         bytes memory signatures;
         for (uint256 i = 0; i < 5; i++) {
             (uint8 v, bytes32 r, bytes32 s) = vm.sign(mixedKeys[i], testHash);
@@ -152,14 +205,12 @@ contract WeightedECDSAGasGriefingTest is Test {
         signer.checkSignature(SIGNER_ID, address(0), testHash, signatures);
     }
 
-    function test_WhenLastSignerHasZeroWeight() external {
-        // Install 5 guardians with weight
+    function test_WhenLastSignerHasZeroWeight() external whenValidatingERC1271Signature {
         _installSigner(5);
 
         bytes32 testHash = keccak256("test");
 
-        // Create a signature where a non-guardian IS the last signer (highest address)
-        // Use guardians 0-3 (4 guardians) + one non-guardian that sorts last
+        // Create a non-guardian that will be last after sorting (high address)
         (address nonGuardian, uint256 nonGuardianKey) = makeAddrAndKey("zzz_lastNonGuardian");
 
         address[] memory mixedSigners = new address[](5);
@@ -172,7 +223,7 @@ contract WeightedECDSAGasGriefingTest is Test {
         mixedSigners[4] = nonGuardian;
         mixedKeys[4] = nonGuardianKey;
 
-        // Sort to ensure nonGuardian ends up last
+        // Sort
         for (uint256 i = 0; i < 5; i++) {
             for (uint256 j = i + 1; j < 5; j++) {
                 if (mixedSigners[i] > mixedSigners[j]) {
@@ -182,112 +233,244 @@ contract WeightedECDSAGasGriefingTest is Test {
             }
         }
 
-        // Verify nonGuardian is actually last
         require(mixedSigners[4] == nonGuardian, "Test setup: nonGuardian should be last");
 
-        // Create signatures
         bytes memory signatures;
         for (uint256 i = 0; i < 5; i++) {
             (uint8 v, bytes32 r, bytes32 s) = vm.sign(mixedKeys[i], testHash);
             signatures = abi.encodePacked(signatures, r, s, v);
         }
 
-        // it should return ERC1271_INVALID (not revert)
+        // it should return ERC1271_INVALID
         vm.prank(WALLET);
         bytes4 result = signer.checkSignature(SIGNER_ID, address(0), testHash, signatures);
-        assertEq(result, ERC1271_INVALID, "Last signer with zero weight should return invalid, not revert");
+        assertEq(result, ERC1271_INVALID);
     }
 
-    function test_WhenAllSignersAreValidGuardians() external {
-        // Install 5 guardians
+    function test_WhenAllSignersAreValidGuardians() external whenValidatingERC1271Signature {
         _installSigner(5);
 
         bytes32 testHash = keccak256("test");
-
-        // Create 5 signatures from valid guardians
         bytes memory signatures = _signHash(testHash, 5);
 
         vm.prank(WALLET);
         bytes4 result = signer.checkSignature(SIGNER_ID, address(0), testHash, signatures);
 
-        // it should validate normally and succeed when threshold met (5 * 10 = 50 >= threshold 50)
-        assertEq(result, ERC1271_MAGICVALUE, "Should succeed when all signers are valid guardians");
+        // it should return ERC1271_MAGICVALUE
+        assertEq(result, ERC1271_MAGICVALUE);
     }
 
-    function test_WhenSignatureCountIsZero() external {
+    function test_WhenSignatureCountIsZero() external whenValidatingERC1271Signature {
         _installSigner(5);
 
         bytes32 testHash = keccak256("test");
-
-        // Empty signature
         bytes memory signatures = "";
 
         vm.prank(WALLET);
         bytes4 result = signer.checkSignature(SIGNER_ID, address(0), testHash, signatures);
 
         // it should return ERC1271_INVALID
-        assertEq(result, ERC1271_INVALID, "Should fail with zero signatures");
+        assertEq(result, ERC1271_INVALID);
     }
 
-    function test_WhenSignatureLengthIsNotAMultipleOf65() external {
+    function test_WhenSignatureLengthIsNotAMultipleOf65() external whenValidatingERC1271Signature {
         _installSigner(5);
 
         bytes32 testHash = keccak256("test");
-
-        // Create a signature that is not a multiple of 65 bytes (e.g., 100 bytes)
-        bytes memory signatures = new bytes(100);
+        bytes memory signatures = new bytes(100); // Not a multiple of 65
 
         vm.prank(WALLET);
         bytes4 result = signer.checkSignature(SIGNER_ID, address(0), testHash, signatures);
 
         // it should return ERC1271_INVALID
-        assertEq(result, ERC1271_INVALID, "Should fail when signature length is not multiple of 65");
+        assertEq(result, ERC1271_INVALID);
     }
 
-    function test_WhenMoreThan10ValidGuardiansSigning() external {
-        // Install 12 guardians (more than the old MAX_SIGNATURES of 10)
+    function test_WhenMoreThan10ValidGuardiansSign() external whenValidatingERC1271Signature {
         _installSigner(12);
 
         bytes32 testHash = keccak256("test");
-
-        // Create 12 signatures from valid guardians
         bytes memory signatures = _signHash(testHash, 12);
 
         vm.prank(WALLET);
         bytes4 result = signer.checkSignature(SIGNER_ID, address(0), testHash, signatures);
 
-        // it should succeed - no arbitrary limit on number of signatures
-        // 12 guardians * 10 weight = 120 >= threshold 50
-        assertEq(result, ERC1271_MAGICVALUE, "Should succeed with more than 10 valid guardians (no arbitrary limit)");
+        // it should succeed with no arbitrary limit
+        assertEq(result, ERC1271_MAGICVALUE);
     }
 
-    function test_WhenOnlyLastSignatureIsFromNonGuardian() external {
-        // Install 5 guardians
+    // ============ ERC4337 UserOp Validation Tests ============
+
+    modifier whenValidatingERC4337UserOp() {
+        _;
+    }
+
+    function test_WhenNon_lastSignerHasZeroWeight_WhenValidatingERC4337UserOp() external whenValidatingERC4337UserOp {
         _installSigner(5);
 
-        bytes32 testHash = keccak256("test");
+        PackedUserOperation memory userOp = _createUserOp();
+        bytes32 proposalHash = _computeProposalHash(userOp);
+        bytes32 userOpHash = entrypoint.getUserOpHash(userOp);
 
-        // Use a non-guardian that will sort to be last
-        (address nonGuardian, uint256 nonGuardianKey) = makeAddrAndKey("zzzzzzz_veryLast");
+        // Create a non-guardian with a specific private key that gives a low address
+        uint256 nonGuardianKey = 0x1234567890abcdef;
+        address nonGuardian = vm.addr(nonGuardianKey);
 
-        // Sign with 4 guardians + 1 non-guardian (last)
-        bytes memory signatures;
-        for (uint256 i = 0; i < 4; i++) {
-            (uint8 vi, bytes32 ri, bytes32 si) = vm.sign(guardianKeys[i], testHash);
-            signatures = abi.encodePacked(signatures, ri, si, vi);
+        // If nonGuardian happens to be higher than all guardians, keep trying different keys
+        while (nonGuardian > guardians[4]) {
+            nonGuardianKey += 1;
+            nonGuardian = vm.addr(nonGuardianKey);
         }
 
-        // Ensure nonGuardian address is actually higher than all 4 guardians used
-        require(nonGuardian > guardians[3], "Test setup: nonGuardian must sort after guardians[3]");
+        address[] memory mixedSigners = new address[](5);
+        uint256[] memory mixedKeys = new uint256[](5);
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(nonGuardianKey, testHash);
+        mixedSigners[0] = nonGuardian;
+        mixedKeys[0] = nonGuardianKey;
+        for (uint256 i = 0; i < 4; i++) {
+            mixedSigners[i + 1] = guardians[i];
+            mixedKeys[i + 1] = guardianKeys[i];
+        }
+
+        // Sort
+        for (uint256 i = 0; i < 5; i++) {
+            for (uint256 j = i + 1; j < 5; j++) {
+                if (mixedSigners[i] > mixedSigners[j]) {
+                    (mixedSigners[i], mixedSigners[j]) = (mixedSigners[j], mixedSigners[i]);
+                    (mixedKeys[i], mixedKeys[j]) = (mixedKeys[j], mixedKeys[i]);
+                }
+            }
+        }
+
+        require(mixedSigners[4] != nonGuardian, "Test setup: nonGuardian should not be last");
+
+        // Sign: first 4 sign proposalHash, last signs userOpHash
+        bytes memory signatures;
+        for (uint256 i = 0; i < 4; i++) {
+            (uint8 vi, bytes32 ri, bytes32 si) = vm.sign(mixedKeys[i], proposalHash);
+            signatures = abi.encodePacked(signatures, ri, si, vi);
+        }
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mixedKeys[4], userOpHash);
         signatures = abi.encodePacked(signatures, r, s, v);
 
-        vm.prank(WALLET);
-        bytes4 result = signer.checkSignature(SIGNER_ID, address(0), testHash, signatures);
+        userOp.signature = signatures;
 
-        // it should return ERC1271_INVALID without reverting
-        // 4 valid guardians * 10 = 40 < threshold 50, and last signer has 0 weight
-        assertEq(result, ERC1271_INVALID, "Should return invalid when only last signature is non-guardian");
+        // it should revert with ZeroWeightSigner
+        vm.prank(WALLET);
+        vm.expectRevert(WeightedECDSASigner.ZeroWeightSigner.selector);
+        signer.checkUserOpSignature(SIGNER_ID, userOp, userOpHash);
+    }
+
+    function test_WhenLastSignerHasZeroWeight_WhenValidatingERC4337UserOp() external whenValidatingERC4337UserOp {
+        _installSigner(5);
+
+        PackedUserOperation memory userOp = _createUserOp();
+        bytes32 proposalHash = _computeProposalHash(userOp);
+        bytes32 userOpHash = entrypoint.getUserOpHash(userOp);
+
+        // Create a non-guardian that will be last after sorting
+        (address nonGuardian, uint256 nonGuardianKey) = makeAddrAndKey("zzz_lastNonGuardian");
+
+        // Use 4 guardians + nonGuardian, ensure nonGuardian is last
+        address[] memory mixedSigners = new address[](5);
+        uint256[] memory mixedKeys = new uint256[](5);
+
+        for (uint256 i = 0; i < 4; i++) {
+            mixedSigners[i] = guardians[i];
+            mixedKeys[i] = guardianKeys[i];
+        }
+        mixedSigners[4] = nonGuardian;
+        mixedKeys[4] = nonGuardianKey;
+
+        // Sort
+        for (uint256 i = 0; i < 5; i++) {
+            for (uint256 j = i + 1; j < 5; j++) {
+                if (mixedSigners[i] > mixedSigners[j]) {
+                    (mixedSigners[i], mixedSigners[j]) = (mixedSigners[j], mixedSigners[i]);
+                    (mixedKeys[i], mixedKeys[j]) = (mixedKeys[j], mixedKeys[i]);
+                }
+            }
+        }
+
+        require(mixedSigners[4] == nonGuardian, "Test setup: nonGuardian should be last");
+
+        // Sign: first 4 sign proposalHash, last (nonGuardian) signs userOpHash
+        bytes memory signatures;
+        for (uint256 i = 0; i < 4; i++) {
+            (uint8 vi, bytes32 ri, bytes32 si) = vm.sign(mixedKeys[i], proposalHash);
+            signatures = abi.encodePacked(signatures, ri, si, vi);
+        }
+        (uint8 vLast, bytes32 rLast, bytes32 sLast) = vm.sign(nonGuardianKey, userOpHash);
+        signatures = abi.encodePacked(signatures, rLast, sLast, vLast);
+
+        userOp.signature = signatures;
+
+        // it should return SIG_VALIDATION_FAILED
+        vm.prank(WALLET);
+        uint256 result = signer.checkUserOpSignature(SIGNER_ID, userOp, userOpHash);
+        assertEq(result, SIG_VALIDATION_FAILED_UINT);
+    }
+
+    function test_WhenAllSignersAreValidGuardians_WhenValidatingERC4337UserOp() external whenValidatingERC4337UserOp {
+        _installSigner(5);
+
+        PackedUserOperation memory userOp = _createUserOp();
+        bytes32 userOpHash = entrypoint.getUserOpHash(userOp);
+
+        userOp.signature = _signUserOp(userOp, 5);
+
+        vm.prank(WALLET);
+        uint256 result = signer.checkUserOpSignature(SIGNER_ID, userOp, userOpHash);
+
+        // it should return SIG_VALIDATION_SUCCESS
+        assertEq(result, SIG_VALIDATION_SUCCESS_UINT);
+    }
+
+    function test_WhenSignatureCountIsZero_WhenValidatingERC4337UserOp() external whenValidatingERC4337UserOp {
+        _installSigner(5);
+
+        PackedUserOperation memory userOp = _createUserOp();
+        bytes32 userOpHash = entrypoint.getUserOpHash(userOp);
+
+        userOp.signature = "";
+
+        vm.prank(WALLET);
+        uint256 result = signer.checkUserOpSignature(SIGNER_ID, userOp, userOpHash);
+
+        // it should return SIG_VALIDATION_FAILED
+        assertEq(result, SIG_VALIDATION_FAILED_UINT);
+    }
+
+    function test_WhenSignatureLengthIsNotAMultipleOf65_WhenValidatingERC4337UserOp()
+        external
+        whenValidatingERC4337UserOp
+    {
+        _installSigner(5);
+
+        PackedUserOperation memory userOp = _createUserOp();
+        bytes32 userOpHash = entrypoint.getUserOpHash(userOp);
+
+        userOp.signature = new bytes(100); // Not a multiple of 65
+
+        vm.prank(WALLET);
+        uint256 result = signer.checkUserOpSignature(SIGNER_ID, userOp, userOpHash);
+
+        // it should return SIG_VALIDATION_FAILED
+        assertEq(result, SIG_VALIDATION_FAILED_UINT);
+    }
+
+    function test_WhenMoreThan10ValidGuardiansSign_WhenValidatingERC4337UserOp() external whenValidatingERC4337UserOp {
+        _installSigner(12);
+
+        PackedUserOperation memory userOp = _createUserOp();
+        bytes32 userOpHash = entrypoint.getUserOpHash(userOp);
+
+        userOp.signature = _signUserOp(userOp, 12);
+
+        vm.prank(WALLET);
+        uint256 result = signer.checkUserOpSignature(SIGNER_ID, userOp, userOpHash);
+
+        // it should succeed with no arbitrary limit
+        assertEq(result, SIG_VALIDATION_SUCCESS_UINT);
     }
 }

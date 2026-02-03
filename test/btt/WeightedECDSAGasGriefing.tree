@@ -1,15 +1,27 @@
 WeightedECDSAGasGriefingTest
-├── when non-last signer has zero weight
-│   └── it should revert with ZeroWeightSigner
-├── when last signer has zero weight
-│   └── it should return ERC1271_INVALID (not revert)
-├── when all signers are valid guardians
-│   └── it should validate normally and succeed when threshold met
-├── when signature count is zero
-│   └── it should return ERC1271_INVALID
-├── when signature length is not a multiple of 65
-│   └── it should return ERC1271_INVALID
-├── when more than 10 valid guardians sign
-│   └── it should succeed (no arbitrary limit)
-└── when only last signature is from non-guardian
-    └── it should return ERC1271_INVALID without reverting
+├── when validating ERC1271 signature
+│   ├── when non-last signer has zero weight
+│   │   └── it should revert with ZeroWeightSigner
+│   ├── when last signer has zero weight
+│   │   └── it should return ERC1271_INVALID
+│   ├── when all signers are valid guardians
+│   │   └── it should return ERC1271_MAGICVALUE
+│   ├── when signature count is zero
+│   │   └── it should return ERC1271_INVALID
+│   ├── when signature length is not a multiple of 65
+│   │   └── it should return ERC1271_INVALID
+│   └── when more than 10 valid guardians sign
+│       └── it should succeed with no arbitrary limit
+└── when validating ERC4337 userOp
+    ├── when non-last signer has zero weight
+    │   └── it should revert with ZeroWeightSigner
+    ├── when last signer has zero weight
+    │   └── it should return SIG_VALIDATION_FAILED
+    ├── when all signers are valid guardians
+    │   └── it should return SIG_VALIDATION_SUCCESS
+    ├── when signature count is zero
+    │   └── it should return SIG_VALIDATION_FAILED
+    ├── when signature length is not a multiple of 65
+    │   └── it should return SIG_VALIDATION_FAILED
+    └── when more than 10 valid guardians sign
+        └── it should succeed with no arbitrary limit
