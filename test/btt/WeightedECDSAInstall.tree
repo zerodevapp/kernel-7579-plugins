@@ -1,0 +1,37 @@
+WeightedECDSAInstallTest
+├── when installing signer
+│   ├── when guardians and weights length mismatch
+│   │   └── it should revert
+│   ├── when guardian is self
+│   │   └── it should revert
+│   ├── when guardian is address zero
+│   │   └── it should revert
+│   ├── when weight is zero
+│   │   └── it should revert
+│   ├── when guardian is already enabled
+│   │   └── it should revert
+│   └── when all parameters are valid
+│       └── it should install successfully
+├── when uninstalling signer
+│   ├── when signer is not initialized
+│   │   └── it should revert with NotInitialized
+│   ├── when signer is initialized
+│   │   └── it should uninstall successfully
+│   └── when uninstalling with multiple guardians
+│       └── it should clear all guardian data
+├── when checking threshold zero
+│   ├── when validating userOp with threshold zero
+│   │   └── it should return SIG_VALIDATION_FAILED
+│   └── when validating ERC1271 with threshold zero
+│       └── it should return ERC1271_INVALID
+├── when checking module type
+│   ├── when type is signer
+│   │   └── it should return true
+│   ├── when type is stateless validator
+│   │   └── it should return true
+│   ├── when type is stateless validator with sender
+│   │   └── it should return true
+│   └── when type is validator
+│       └── it should return false
+└── when validating signature with data with sender
+    └── it should validate correctly

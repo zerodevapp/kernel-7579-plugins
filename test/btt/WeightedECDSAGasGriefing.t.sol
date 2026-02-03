@@ -299,6 +299,29 @@ contract WeightedECDSAGasGriefingTest is Test {
         assertEq(result, ERC1271_MAGICVALUE);
     }
 
+    function test_WhenNon_lastSignersAreNotInSortedOrder() external whenValidatingERC1271Signature {
+        _installSigner(5);
+
+        bytes32 testHash = keccak256("test");
+
+        // Sign in wrong order: higher address before lower address
+        bytes memory signatures;
+        // Sign with guardian at index 1 first (higher address than index 0)
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(guardianKeys[1], testHash);
+        signatures = abi.encodePacked(signatures, r1, s1, v1);
+        // Sign with guardian at index 0 second (lower address - wrong order)
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(guardianKeys[0], testHash);
+        signatures = abi.encodePacked(signatures, r2, s2, v2);
+        // Sign with guardian at index 2 last
+        (uint8 v3, bytes32 r3, bytes32 s3) = vm.sign(guardianKeys[2], testHash);
+        signatures = abi.encodePacked(signatures, r3, s3, v3);
+
+        // it should return ERC1271_INVALID
+        vm.prank(WALLET);
+        bytes4 result = signer.checkSignature(SIGNER_ID, address(0), testHash, signatures);
+        assertEq(result, ERC1271_INVALID);
+    }
+
     // ============ ERC4337 UserOp Validation Tests ============
 
     modifier whenValidatingERC4337UserOp() {
@@ -472,5 +495,35 @@ contract WeightedECDSAGasGriefingTest is Test {
 
         // it should succeed with no arbitrary limit
         assertEq(result, SIG_VALIDATION_SUCCESS_UINT);
+    }
+
+    function test_RevertWhen_Non_lastSignersAreNotInSortedOrder()
+        external
+        whenValidatingERC4337UserOp
+    {
+        _installSigner(5);
+
+        PackedUserOperation memory userOp = _createUserOp();
+        bytes32 proposalHash = _computeProposalHash(userOp);
+        bytes32 userOpHash = entrypoint.getUserOpHash(userOp);
+
+        // Sign in wrong order: higher address before lower address for proposalHash
+        bytes memory signatures;
+        // Sign with guardian at index 1 first (higher address than index 0)
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(guardianKeys[1], proposalHash);
+        signatures = abi.encodePacked(signatures, r1, s1, v1);
+        // Sign with guardian at index 0 second (lower address - wrong order)
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(guardianKeys[0], proposalHash);
+        signatures = abi.encodePacked(signatures, r2, s2, v2);
+        // Sign userOpHash with guardian at index 2 last
+        (uint8 v3, bytes32 r3, bytes32 s3) = vm.sign(guardianKeys[2], userOpHash);
+        signatures = abi.encodePacked(signatures, r3, s3, v3);
+
+        userOp.signature = signatures;
+
+        // it should revert with "Signers not sorted"
+        vm.prank(WALLET);
+        vm.expectRevert("Signers not sorted");
+        signer.checkUserOpSignature(SIGNER_ID, userOp, userOpHash);
     }
 }
