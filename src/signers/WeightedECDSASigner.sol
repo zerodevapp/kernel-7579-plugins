@@ -48,9 +48,15 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
     }
 
     function _signerOninstall(bytes32 id, bytes calldata _data) internal override {
+        // Prevent reinstall without uninstall (would orphan old guardians and corrupt totalWeight)
+        if (_isInitialized(id, msg.sender)) revert AlreadyInitialized(msg.sender);
+
         (address[] memory _guardians, uint24[] memory _weights, uint24 _threshold) =
             abi.decode(_data, (address[], uint24[], uint24));
         require(_guardians.length == _weights.length, "Length mismatch");
+        require(_guardians.length > 0, "No guardians");
+        require(_threshold > 0, "Zero threshold");
+
         weightedStorage[id][msg.sender].firstGuardian = msg.sender;
         for (uint256 i = 0; i < _guardians.length; i++) {
             require(_guardians[i] != msg.sender, "Guardian cannot be self");
