@@ -10,10 +10,7 @@ import {
     MODULE_TYPE_POLICY,
     MODULE_TYPE_STATELESS_VALIDATOR,
     MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER,
-    SIG_VALIDATION_SUCCESS_UINT,
-    SIG_VALIDATION_FAILED_UINT,
-    ERC1271_MAGICVALUE,
-    ERC1271_INVALID
+    SIG_VALIDATION_FAILED_UINT
 } from "src/types/Constants.sol";
 
 /**
@@ -346,7 +343,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
      * @notice Check if executeUserOp call is a no-op
      * @dev Valid: executeUserOp("", bytes32)
      */
-    function _isNoOpExecuteUserOp(bytes calldata callData) internal view returns (bool) {
+    function _isNoOpExecuteUserOp(bytes calldata callData) internal pure returns (bool) {
         // executeUserOp(bytes calldata userOp, bytes32 userOpHash)
         // Format: 4 (selector) + 32 (userOp offset) + 32 (userOpHash) + 32 (userOp length) + userOp data
         if (callData.length < 100) return false;
@@ -380,37 +377,33 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
     /**
      * @notice Check signature against timelock policy (for ERC-1271)
-     * @param id The policy ID
-     * @return validationData 0 if valid, 1 if invalid
+     * @dev TimelockPolicy does not support ERC-1271 signature validation - always reverts
      */
-    function checkSignaturePolicy(bytes32 id, address, bytes32 hash, bytes calldata sig)
+    function checkSignaturePolicy(bytes32, address, bytes32, bytes calldata)
         external
-        view
+        pure
         override
         returns (uint256)
     {
-        bytes4 result = _validateSignaturePolicy(id, msg.sender, hash, sig);
-        return result == ERC1271_MAGICVALUE ? 0 : 1;
+        revert("TimelockPolicy: signature validation not supported");
     }
 
-    function validateSignatureWithData(bytes32, bytes calldata, bytes calldata data)
+    function validateSignatureWithData(bytes32, bytes calldata, bytes calldata)
         external
         pure
         override(IStatelessValidator)
         returns (bool)
     {
-        (uint48 delay, uint48 expirationPeriod) = abi.decode(data, (uint48, uint48));
-        return delay != 0 && expirationPeriod != 0;
+        revert("TimelockPolicy: stateless signature validation not supported");
     }
 
-    function validateSignatureWithDataWithSender(address, bytes32, bytes calldata, bytes calldata data)
+    function validateSignatureWithDataWithSender(address, bytes32, bytes calldata, bytes calldata)
         external
         pure
         override(IStatelessValidatorWithSender)
         returns (bool)
     {
-        (uint48 delay, uint48 expirationPeriod) = abi.decode(data, (uint48, uint48));
-        return delay != 0 && expirationPeriod != 0;
+        revert("TimelockPolicy: stateless signature validation not supported");
     }
 
     // ==================== Internal Shared Logic ====================
@@ -435,23 +428,6 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
         // Otherwise, this is a proposal execution request
         return _handleProposalExecutionInternal(id, userOp, account);
-    }
-
-    /**
-     * @notice Internal function to validate signature policy
-     * @dev Shared logic for both installed and stateless validator modes
-     */
-    function _validateSignaturePolicy(bytes32 id, address account, bytes32 hash, bytes calldata sig)
-        internal
-        view
-        returns (bytes4)
-    {
-        TimelockConfig storage config = timelockConfig[id][account];
-        if (!config.initialized) return ERC1271_INVALID;
-
-        // For signature validation, we're more permissive
-        // Timelock is primarily for userOp execution
-        return ERC1271_MAGICVALUE;
     }
 
     /**

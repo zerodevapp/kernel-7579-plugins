@@ -107,21 +107,33 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         return statelessValidationSignature(bytes32(0), valid);
     }
 
-    // Override stateless validator tests to use proper data parameter
+    // Override stateless validator tests - TimelockPolicy reverts for stateless validation
     function testStatlessValidatorFail() external override {
         IStatelessValidator validatorModule = IStatelessValidator(address(module));
 
         bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
         (, bytes memory sig) = statelessValidationSignature(message, false);
 
-        // For TimelockPolicy, validation fails if delay or expirationPeriod is 0
-        bytes memory invalidData = abi.encode(uint48(0), uint48(0));
+        bytes memory data = abi.encode(uint48(0), uint48(0));
 
         vm.startPrank(WALLET);
-        bool result = validatorModule.validateSignatureWithData(message, sig, invalidData);
+        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        validatorModule.validateSignatureWithData(message, sig, data);
         vm.stopPrank();
+    }
 
-        assertFalse(result);
+    function testStatelessValidatorSuccess() external override {
+        IStatelessValidator validatorModule = IStatelessValidator(address(module));
+
+        bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
+        (, bytes memory sig) = statelessValidationSignature(message, true);
+
+        bytes memory validData = abi.encode(delay, expirationPeriod);
+
+        vm.startPrank(WALLET);
+        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        validatorModule.validateSignatureWithData(message, sig, validData);
+        vm.stopPrank();
     }
 
     function testStatelessValidatorWithSenderFail() external override {
@@ -130,14 +142,26 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
         (address caller, bytes memory sig) = statelessValidationSignatureWithSender(message, false);
 
-        // For TimelockPolicy, validation fails if delay or expirationPeriod is 0
-        bytes memory invalidData = abi.encode(uint48(0), uint48(0));
+        bytes memory data = abi.encode(uint48(0), uint48(0));
 
         vm.startPrank(WALLET);
-        bool result = validatorModule.validateSignatureWithDataWithSender(caller, message, sig, invalidData);
+        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        validatorModule.validateSignatureWithDataWithSender(caller, message, sig, data);
         vm.stopPrank();
+    }
 
-        assertFalse(result);
+    function testStatelessValidatorWithSenderSuccess() external override {
+        IStatelessValidatorWithSender validatorModule = IStatelessValidatorWithSender(address(module));
+
+        bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
+        (address caller, bytes memory sig) = statelessValidationSignatureWithSender(message, true);
+
+        bytes memory validData = abi.encode(delay, expirationPeriod);
+
+        vm.startPrank(WALLET);
+        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        validatorModule.validateSignatureWithDataWithSender(caller, message, sig, validData);
+        vm.stopPrank();
     }
 
     // Override the checkUserOpPolicy tests because TimelockPolicy has special behavior
@@ -184,22 +208,32 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         assertEq(validationResult, 1);
     }
 
-    // Override signature policy test because TimelockPolicy always passes for installed accounts
+    // Override signature policy tests - TimelockPolicy reverts for signature validation
+    function testPolicyCheckSignaturePolicySuccess() public payable override {
+        TimelockPolicy policyModule = TimelockPolicy(address(module));
+        vm.startPrank(WALLET);
+        policyModule.onInstall(abi.encodePacked(policyId(), installData()));
+        vm.stopPrank();
+
+        bytes32 testHash = keccak256(abi.encodePacked("TEST_HASH"));
+        (address sender, bytes memory sigData) = validSignatureData(testHash);
+
+        vm.startPrank(WALLET);
+        vm.expectRevert("TimelockPolicy: signature validation not supported");
+        policyModule.checkSignaturePolicy(policyId(), sender, testHash, sigData);
+        vm.stopPrank();
+    }
+
     function testPolicyCheckSignaturePolicyFail() public payable override {
         TimelockPolicy policyModule = TimelockPolicy(address(module));
-
-        // Don't install for this wallet
-        address nonInstalledWallet = address(0xBEEF);
 
         bytes32 testHash = keccak256(abi.encodePacked("TEST_HASH"));
         (address sender, bytes memory sigData) = invalidSignatureData(testHash);
 
-        vm.startPrank(nonInstalledWallet);
-        uint256 result = policyModule.checkSignaturePolicy(policyId(), sender, testHash, sigData);
+        vm.startPrank(WALLET);
+        vm.expectRevert("TimelockPolicy: signature validation not supported");
+        policyModule.checkSignaturePolicy(policyId(), sender, testHash, sigData);
         vm.stopPrank();
-
-        // Should fail for non-installed account
-        assertFalse(result == 0);
     }
 
     // Additional TimelockPolicy-specific tests
