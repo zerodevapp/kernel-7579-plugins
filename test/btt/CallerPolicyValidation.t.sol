@@ -2,17 +2,17 @@
 pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
-import {SignaturePolicy, Status} from "src/policies/SignaturePolicy.sol";
+import {CallerPolicy, Status} from "src/policies/CallerPolicy.sol";
 import {IPolicy} from "src/interfaces/IERC7579Modules.sol";
 
-/// @title SignaturePolicyCallerValidationTest
-/// @notice BTT tests for the SignaturePolicy caller validation fix (TOB-KERNEL-19)
+/// @title CallerPolicyValidationTest
+/// @notice BTT tests for the CallerPolicy caller validation fix (TOB-KERNEL-19)
 /// @dev Tests the fix that validates callers array on install:
 ///      - Empty callers array should revert
 ///      - Zero address in callers should revert
 ///      - Valid callers should be properly registered
-contract SignaturePolicyCallerValidationTest is Test {
-    SignaturePolicy public policy;
+contract CallerPolicyValidationTest is Test {
+    CallerPolicy public policy;
 
     address constant WALLET_1 = address(0x1234);
     address constant WALLET_2 = address(0x5678);
@@ -23,7 +23,7 @@ contract SignaturePolicyCallerValidationTest is Test {
     bytes32 constant POLICY_ID = keccak256("TEST_POLICY_ID");
 
     function setUp() public {
-        policy = new SignaturePolicy();
+        policy = new CallerPolicy();
     }
 
     // ==================== Installation Tests ====================

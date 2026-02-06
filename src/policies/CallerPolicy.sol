@@ -21,13 +21,13 @@ import {
 } from "src/types/Constants.sol";
 
 /**
- * @title SignaturePolicy
+ * @title CallerPolicy
  * @notice A policy that restricts which protocols (callers) can request ERC-1271 signatures
  * @dev This policy validates the REQUESTING PROTOCOL (sender), not the actual signer.
  *      Use case: Only allow specific protocols (e.g., Permit2, Uniswap) to request signatures.
  *      If you need to validate who signed, use a signer module instead.
  */
-contract SignaturePolicy is PolicyBase, IStatelessValidatorWithSender {
+contract CallerPolicy is PolicyBase, IStatelessValidatorWithSender {
     mapping(bytes32 id => mapping(address => Status)) public status;
     /// @notice Maps policy ID => requesting protocol => wallet => whether protocol is allowed
     mapping(bytes32 id => mapping(address caller => mapping(address wallet => bool))) public allowedCaller;

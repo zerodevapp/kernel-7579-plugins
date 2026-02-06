@@ -1,4 +1,4 @@
-SignaturePolicyCallerValidationTest
+CallerPolicyValidationTest
 ├── when installing with empty callers array
 │   └── it should revert with EmptyCallersArray
 ├── when installing with callers array containing zero address
