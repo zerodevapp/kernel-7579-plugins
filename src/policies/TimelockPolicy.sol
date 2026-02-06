@@ -39,10 +39,14 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         ProposalStatus status;
         uint48 validAfter; // Timestamp when proposal becomes executable
         uint48 validUntil; // Timestamp when proposal expires
+        uint256 epoch; // Epoch when proposal was created
     }
 
     // Storage: id => wallet => config
     mapping(bytes32 => mapping(address => TimelockConfig)) public timelockConfig;
+
+    // Storage: id => wallet => epoch (persists across uninstall/reinstall)
+    mapping(bytes32 => mapping(address => uint256)) public currentEpoch;
 
     // Storage: userOpKey => id => wallet => proposal
     // userOpKey = keccak256(abi.encode(account, keccak256(callData), nonce))
@@ -66,6 +70,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
     error ProposalExpired(uint256 validUntil, uint256 currentTime);
     error ProposalNotPending();
     error OnlyAccount();
+    error ProposalFromPreviousEpoch();
 
     /**
      * @notice Install the timelock policy
@@ -80,6 +85,9 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
         if (delay == 0) revert InvalidDelay();
         if (expirationPeriod == 0) revert InvalidExpirationPeriod();
+
+        // Increment epoch to invalidate any proposals from previous installations
+        currentEpoch[id][msg.sender]++;
 
         timelockConfig[id][msg.sender] =
             TimelockConfig({delay: delay, expirationPeriod: expirationPeriod, initialized: true});
@@ -131,9 +139,9 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
             revert ProposalAlreadyExists();
         }
 
-        // Create proposal (stored by userOpKey)
+        // Create proposal (stored by userOpKey) with current epoch
         proposals[userOpKey][id][account] =
-            Proposal({status: ProposalStatus.Pending, validAfter: validAfter, validUntil: validUntil});
+            Proposal({status: ProposalStatus.Pending, validAfter: validAfter, validUntil: validUntil, epoch: currentEpoch[id][account]});
 
         emit ProposalCreated(account, id, userOpKey, validAfter, validUntil);
     }
@@ -219,9 +227,9 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
             return SIG_VALIDATION_FAILED_UINT; // Proposal already exists
         }
 
-        // Create proposal
+        // Create proposal with current epoch
         proposals[userOpKey][id][account] =
-            Proposal({status: ProposalStatus.Pending, validAfter: validAfter, validUntil: validUntil});
+            Proposal({status: ProposalStatus.Pending, validAfter: validAfter, validUntil: validUntil, epoch: currentEpoch[id][account]});
 
         emit ProposalCreated(account, id, userOpKey, validAfter, validUntil);
 
@@ -244,6 +252,9 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
         // Check proposal exists and is pending
         if (proposal.status != ProposalStatus.Pending) return SIG_VALIDATION_FAILED_UINT;
+
+        // Check proposal is from current epoch (not a stale proposal from previous installation)
+        if (proposal.epoch != currentEpoch[id][account]) return SIG_VALIDATION_FAILED_UINT;
 
         // Mark as executed
         proposal.status = ProposalStatus.Executed;

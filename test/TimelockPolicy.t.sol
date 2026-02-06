@@ -294,4 +294,40 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
 
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending));
     }
+
+    // Test that stale proposals from previous installations cannot be executed
+    function testStaleProposalNotExecutableAfterReinstall() public {
+        TimelockPolicy policyModule = TimelockPolicy(address(module));
+        vm.startPrank(WALLET);
+        policyModule.onInstall(abi.encodePacked(policyId(), installData()));
+        vm.stopPrank();
+
+        PackedUserOperation memory userOp = validUserOp();
+
+        // Create a proposal
+        vm.startPrank(WALLET);
+        policyModule.createProposal(policyId(), WALLET, userOp.callData, userOp.nonce);
+        vm.stopPrank();
+
+        // Fast forward past delay
+        vm.warp(block.timestamp + delay + 1);
+
+        // Uninstall the policy
+        vm.startPrank(WALLET);
+        policyModule.onUninstall(abi.encodePacked(policyId(), ""));
+        vm.stopPrank();
+
+        // Reinstall the policy
+        vm.startPrank(WALLET);
+        policyModule.onInstall(abi.encodePacked(policyId(), installData()));
+        vm.stopPrank();
+
+        // Try to execute the stale proposal - should fail
+        vm.startPrank(WALLET);
+        uint256 validationResult = policyModule.checkUserOpPolicy(policyId(), userOp);
+        vm.stopPrank();
+
+        // Should fail (return 1 = SIG_VALIDATION_FAILED_UINT) because proposal is from previous epoch
+        assertEq(validationResult, 1);
+    }
 }
