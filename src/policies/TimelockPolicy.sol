@@ -299,20 +299,22 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
      */
     function _isNoOpERC7579Execute(bytes calldata callData) internal view returns (bool) {
         // execute(bytes32 mode, bytes calldata executionCalldata)
-        // Need: 4 (selector) + 32 (mode) + 32 (offset) + 32 (length) + data
-        if (callData.length < 68) return false;
+        // ABI layout: 4 (selector) + 32 (mode) + 32 (offset) + 32 (length) + data
+        if (callData.length < 100) return false;
 
-        // Decode the offset to executionCalldata (should be 32)
+        // Offset to executionCalldata: 2 head slots (mode + offset) = 64
         uint256 offset = uint256(bytes32(callData[36:68]));
-        if (offset != 32) return false;
+        if (offset != 64) return false;
 
         // Decode the length of executionCalldata
-        if (callData.length < 100) return false;
         uint256 execDataLength = uint256(bytes32(callData[68:100]));
 
-        // For single execution mode, executionCalldata format is:
-        // target (20 bytes) + value (32 bytes) + calldata (variable)
-        if (execDataLength < 52) return false;
+        // ERC-7579 single execution uses compact format (no length prefix):
+        // executionCalldata = abi.encodePacked(target, value, calldata)
+        // target (20 bytes) + value (32 bytes) = 52 bytes with no inner calldata
+        if (execDataLength != 52) return false;
+
+        if (callData.length < 152) return false;
 
         // Extract target address (first 20 bytes of executionCalldata)
         address target = address(bytes20(callData[100:120]));
@@ -324,19 +326,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         uint256 value = uint256(bytes32(callData[120:152]));
 
         // Value must be 0
-        if (value != 0) return false;
-
-        // Check calldata length (remaining bytes should indicate empty calldata)
-        // executionCalldata = target(20) + value(32) + calldataLength(32) + calldata
-        if (callData.length < 184) {
-            // If we don't have enough for calldata length field, it's malformed
-            return false;
-        }
-
-        uint256 innerCalldataLength = uint256(bytes32(callData[152:184]));
-
-        // Inner calldata must be empty
-        return innerCalldataLength == 0;
+        return value == 0;
     }
 
     /**
