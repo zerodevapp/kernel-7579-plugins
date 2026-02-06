@@ -701,15 +701,11 @@ contract TimelockTest is Test {
 
     function test_GivenTargetIsSelfAndValueIsZeroAndInnerCalldataIsEmpty() external whenDetectingERC7579ExecuteNoop {
         // it should be detected as noop
-        bytes memory callData = abi.encodePacked(
-            IERC7579Execution.execute.selector,
-            bytes32(0), // mode
-            bytes32(uint256(32)), // offset
-            bytes32(uint256(84)), // execDataLength (20+32+32)
-            bytes20(WALLET), // target = self
-            bytes32(uint256(0)), // value = 0
-            bytes32(uint256(0)) // innerCalldataLength = 0
-        );
+        // ERC-7579 compact format: abi.encodePacked(target, value) = 52 bytes
+        bytes memory executionCalldata = abi.encodePacked(bytes20(WALLET), uint256(0));
+
+        bytes memory callData =
+            abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), executionCalldata);
 
         bytes memory sig = _createProposalSignature("proposal", 0);
         PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, sig);
@@ -725,15 +721,11 @@ contract TimelockTest is Test {
         whenDetectingERC7579ExecuteNoop
     {
         // it should be detected as noop
-        bytes memory callData = abi.encodePacked(
-            IERC7579Execution.execute.selector,
-            bytes32(0), // mode
-            bytes32(uint256(32)), // offset
-            bytes32(uint256(84)), // execDataLength
-            bytes20(address(0)), // target = address(0)
-            bytes32(uint256(0)), // value = 0
-            bytes32(uint256(0)) // innerCalldataLength = 0
-        );
+        // ERC-7579 compact format: abi.encodePacked(target, value) = 52 bytes
+        bytes memory executionCalldata = abi.encodePacked(bytes20(address(0)), uint256(0));
+
+        bytes memory callData =
+            abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), executionCalldata);
 
         bytes memory sig = _createProposalSignature("proposal", 1);
         PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, sig);
@@ -756,15 +748,14 @@ contract TimelockTest is Test {
         assertEq(result, SIG_VALIDATION_FAILED, "Too short for offset should not be noop");
     }
 
-    function test_GivenOffsetIsNot32() external whenDetectingERC7579ExecuteNoop {
+    function test_GivenOffsetIsNot64() external whenDetectingERC7579ExecuteNoop {
         // it should not be detected as noop
         bytes memory callData = abi.encodePacked(
             IERC7579Execution.execute.selector,
             bytes32(0), // mode
-            bytes32(uint256(64)), // wrong offset (should be 32)
+            bytes32(uint256(32)), // wrong offset (should be 64)
             bytes32(uint256(52)), // length
-            WALLET,
-            uint256(0),
+            bytes20(WALLET),
             uint256(0)
         );
 
@@ -781,7 +772,7 @@ contract TimelockTest is Test {
         bytes memory callData = abi.encodePacked(
             IERC7579Execution.execute.selector,
             bytes32(0), // mode
-            bytes32(uint256(32)) // offset
+            bytes32(uint256(64)) // offset
             // missing length and data
         );
 
@@ -793,13 +784,13 @@ contract TimelockTest is Test {
         assertEq(result, SIG_VALIDATION_FAILED, "Too short for length should not be noop");
     }
 
-    function test_GivenExecDataLengthIsLessThan52() external whenDetectingERC7579ExecuteNoop {
-        // it should not be detected as noop
+    function test_GivenExecDataLengthIsNot52() external whenDetectingERC7579ExecuteNoop {
+        // it should not be detected as noop (length 20 != 52)
         bytes memory callData = abi.encodePacked(
             IERC7579Execution.execute.selector,
             bytes32(0), // mode
-            bytes32(uint256(32)), // offset
-            bytes32(uint256(20)) // length only 20 (need at least 52)
+            bytes32(uint256(64)), // offset
+            bytes32(uint256(20)) // length only 20 (must be exactly 52)
         );
 
         PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, "");
@@ -807,12 +798,12 @@ contract TimelockTest is Test {
         vm.prank(WALLET);
         uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
 
-        assertEq(result, SIG_VALIDATION_FAILED, "Exec data too short should not be noop");
+        assertEq(result, SIG_VALIDATION_FAILED, "Exec data length != 52 should not be noop");
     }
 
     function test_GivenTargetIsNotSelfOrZero() external whenDetectingERC7579ExecuteNoop {
         // it should not be detected as noop
-        bytes memory executionCalldata = abi.encodePacked(ATTACKER, uint256(0), uint256(0));
+        bytes memory executionCalldata = abi.encodePacked(bytes20(ATTACKER), uint256(0));
 
         bytes memory callData =
             abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), executionCalldata);
@@ -827,7 +818,7 @@ contract TimelockTest is Test {
 
     function test_GivenValueIsNonzero() external whenDetectingERC7579ExecuteNoop {
         // it should not be detected as noop
-        bytes memory executionCalldata = abi.encodePacked(WALLET, uint256(1 ether), uint256(0));
+        bytes memory executionCalldata = abi.encodePacked(bytes20(WALLET), uint256(1 ether));
 
         bytes memory callData =
             abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), executionCalldata);
@@ -840,28 +831,9 @@ contract TimelockTest is Test {
         assertEq(result, SIG_VALIDATION_FAILED, "Non-zero value should not be noop");
     }
 
-    function test_GivenCalldataIsShorterThan184Bytes() external whenDetectingERC7579ExecuteNoop {
-        // it should not be detected as noop
-        bytes memory callData = abi.encodePacked(
-            IERC7579Execution.execute.selector,
-            bytes32(0), // mode
-            bytes32(uint256(32)), // offset
-            bytes32(uint256(52)), // execDataLength (exactly 52, no room for inner calldata length)
-            WALLET, // 20 bytes
-            uint256(0) // 32 bytes = 52 total
-        );
-
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, "");
-
-        vm.prank(WALLET);
-        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
-
-        assertEq(result, SIG_VALIDATION_FAILED, "Too short for inner calldata length should not be noop");
-    }
-
-    function test_GivenInnerCalldataLengthIsNonzero() external whenDetectingERC7579ExecuteNoop {
-        // it should not be detected as noop
-        bytes memory executionCalldata = abi.encodePacked(WALLET, uint256(0), uint256(10));
+    function test_GivenExecDataLengthGreaterThan52() external whenDetectingERC7579ExecuteNoop {
+        // it should not be detected as noop (has inner calldata)
+        bytes memory executionCalldata = abi.encodePacked(bytes20(WALLET), uint256(0), hex"deadbeef");
 
         bytes memory callData =
             abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), executionCalldata);
