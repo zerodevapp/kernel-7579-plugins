@@ -68,6 +68,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
     error ProposalNotPending();
     error OnlyAccount();
     error ProposalFromPreviousEpoch();
+    error ParametersTooLarge();
 
     /**
      * @notice Install the timelock policy
@@ -82,6 +83,10 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
         if (delay == 0) revert InvalidDelay();
         if (expirationPeriod == 0) revert InvalidExpirationPeriod();
+        // Prevent uint48 overflow in createProposal: uint48(block.timestamp) + delay + expirationPeriod
+        if (uint256(delay) + uint256(expirationPeriod) > type(uint48).max - block.timestamp) {
+            revert ParametersTooLarge();
+        }
 
         // Increment epoch to invalidate any proposals from previous installations
         currentEpoch[id][msg.sender]++;
