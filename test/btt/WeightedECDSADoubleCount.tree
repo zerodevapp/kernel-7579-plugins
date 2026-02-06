@@ -1,0 +1,21 @@
+WeightedECDSADoubleCountTest
+├── when same guardian signs both proposalHash and userOpHash
+│   ├── it should return SIG_VALIDATION_FAILED
+│   └── it should not count the guardian weight twice
+├── when different guardians sign proposalHash and userOpHash in sorted order
+│   ├── it should return SIG_VALIDATION_SUCCESS when threshold is met
+│   └── it should count each guardian weight once
+├── when guardians are not in sorted order
+│   └── it should revert with Signers not sorted
+├── when last signer has lower address than previous signer
+│   └── it should return SIG_VALIDATION_FAILED
+├── when last signer has equal address to previous signer
+│   └── it should return SIG_VALIDATION_FAILED
+├── when last signer has higher address than previous signer
+│   └── it should return SIG_VALIDATION_SUCCESS when threshold is met
+├── when threshold is met with unique signers only
+│   └── it should validate weight accumulation correctly
+├── when same signer appears twice in ERC1271 signature array
+│   └── it should return ERC1271_INVALID
+└── when ERC1271 signers are in descending order
+    └── it should return ERC1271_INVALID
