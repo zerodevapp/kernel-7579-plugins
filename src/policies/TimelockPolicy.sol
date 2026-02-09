@@ -243,95 +243,49 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
     /**
      * @notice Check if calldata is a no-op operation
-     * @dev Valid no-ops:
+     * @dev Recognizes 4 forms of no-op:
      *      1. Empty calldata
-     *      2. ERC-7579 execute(CALL, self, 0, "")
-     *      3. ERC-7579 execute(CALL, address(0), 0, "")
-     *      4. executeUserOp with empty calldata
+     *      2. ERC-7579 execute(mode=0x00, "") — single-call with empty execution data
+     *      3. executeUserOp + empty inner calldata (just the 4-byte selector)
+     *      4. executeUserOp + ERC-7579 execute no-op (selector + form 2)
      */
-    function _isNoOpCalldata(bytes calldata callData) internal view returns (bool) {
-        // 1. Empty calldata is a no-op
-        if (callData.length == 0) return true;
+    function _isNoOpCalldata(bytes calldata callData) internal pure returns (bool) {
+        uint256 len = callData.length;
 
-        // Need at least 4 bytes for selector
-        if (callData.length < 4) return false;
+        // Case 1: Empty calldata
+        if (len == 0) return true;
 
-        bytes4 selector = bytes4(callData[0:4]);
+        // Case 2: ERC-7579 execute with empty execution data
+        if (_isNoOpERC7579Execute(callData)) return true;
 
-        // 2. Check for ERC-7579 execute(bytes32 mode, bytes calldata executionCalldata)
-        if (selector == IERC7579Execution.execute.selector) {
-            return _isNoOpERC7579Execute(callData);
+        // Cases 3 & 4: executeUserOp wrapper
+        if (len >= 4 && bytes4(callData[0:4]) == IAccountExecute.executeUserOp.selector) {
+            // Case 3: executeUserOp + empty (just the selector, no inner data)
+            if (len == 4) return true;
+            // Case 4: executeUserOp + ERC-7579 execute no-op
+            if (_isNoOpERC7579Execute(callData[4:])) return true;
         }
 
-        // 3. Check for executeUserOp(PackedUserOperation calldata userOp, bytes32 userOpHash)
-        if (selector == IAccountExecute.executeUserOp.selector) {
-            return _isNoOpExecuteUserOp(callData);
-        }
-
-        // Not a recognized no-op
         return false;
     }
 
     /**
-     * @notice Check if ERC-7579 execute call is a no-op
-     * @dev Valid: execute(CALL, self/address(0), 0, "")
+     * @notice Check if calldata is an ERC-7579 execute call with empty execution data
+     * @dev execute(bytes32 mode, bytes calldata executionCalldata) where:
+     *      - mode byte 0 is 0x00 (single call, not batch/delegatecall)
+     *      - executionCalldata is empty
+     *      ABI layout: selector(4) + mode(32) + offset(32) + length(32) = 100 bytes
      */
-    function _isNoOpERC7579Execute(bytes calldata callData) internal view returns (bool) {
-        // execute(bytes32 mode, bytes calldata executionCalldata)
-        // ABI layout: 4 (selector) + 32 (mode) + 32 (offset) + 32 (length) + data
-        if (callData.length < 100) return false;
-
-        // Only accept single call mode (callType = first byte of mode must be 0x00).
-        // Prevents delegatecall (0xFE) or batch (0x01) payloads from being treated as no-ops.
+    function _isNoOpERC7579Execute(bytes calldata callData) internal pure returns (bool) {
+        if (callData.length != 100) return false;
+        if (bytes4(callData[0:4]) != IERC7579Execution.execute.selector) return false;
+        // Mode byte must be 0x00 (single call, not delegatecall or batch)
         if (callData[4] != 0x00) return false;
-
-        // Offset to executionCalldata: 2 head slots (mode + offset) = 64
-        uint256 offset = uint256(bytes32(callData[36:68]));
-        if (offset != 64) return false;
-
-        // Decode the length of executionCalldata
-        uint256 execDataLength = uint256(bytes32(callData[68:100]));
-
-        // ERC-7579 single execution uses compact format (no length prefix):
-        // executionCalldata = abi.encodePacked(target, value, calldata)
-        // target (20 bytes) + value (32 bytes) = 52 bytes with no inner calldata
-        if (execDataLength != 52) return false;
-
-        if (callData.length < 152) return false;
-
-        // Extract target address (first 20 bytes of executionCalldata)
-        address target = address(bytes20(callData[100:120]));
-
-        // Check if target is self or address(0)
-        if (target != msg.sender && target != address(0)) return false;
-
-        // Extract value (next 32 bytes)
-        uint256 value = uint256(bytes32(callData[120:152]));
-
-        // Value must be 0
-        return value == 0;
-    }
-
-    /**
-     * @notice Check if executeUserOp call is a no-op
-     * @dev Valid: executeUserOp("", bytes32)
-     */
-    function _isNoOpExecuteUserOp(bytes calldata callData) internal pure returns (bool) {
-        // executeUserOp(bytes calldata userOp, bytes32 userOpHash)
-        // Format: 4 (selector) + 32 (userOp offset=64) + 32 (userOpHash) + 32 (userOp length) + userOp data
-        if (callData.length < 100) return false;
-
-        // Decode offset to userOp data (should be 64: past 2 head slots)
-        uint256 offset = uint256(bytes32(callData[4:36]));
-        if (offset != 64) return false;
-
-        // userOpHash is at bytes 36-68 (we don't validate it)
-
-        // Decode userOp length
-        uint256 userOpLength = uint256(bytes32(callData[68:100]));
-
-        // UserOp must be empty
-        return userOpLength == 0;
+        // Offset must be 64 (standard ABI encoding for dynamic param after one fixed param)
+        if (uint256(bytes32(callData[36:68])) != 64) return false;
+        // Execution data length must be 0
+        if (uint256(bytes32(callData[68:100])) != 0) return false;
+        return true;
     }
 
     /**
