@@ -61,12 +61,8 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
     error InvalidDelay();
     error InvalidExpirationPeriod();
-    error ProposalNotFound();
-    error TimelockNotExpired(uint256 validAfter, uint256 currentTime);
-    error ProposalExpired(uint256 validUntil, uint256 currentTime);
     error ProposalNotPending();
     error OnlyAccount();
-    error ProposalFromPreviousEpoch();
     error ParametersTooLarge();
 
     /**
@@ -82,7 +78,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
         if (delay == 0) revert InvalidDelay();
         if (expirationPeriod == 0) revert InvalidExpirationPeriod();
-        // Prevent uint48 overflow in createProposal: uint48(block.timestamp) + delay + expirationPeriod
+        // Prevent uint48 overflow: uint48(block.timestamp) + delay + expirationPeriod
         if (uint256(delay) + uint256(expirationPeriod) > type(uint48).max - block.timestamp) {
             revert ParametersTooLarge();
         }
@@ -181,8 +177,8 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         // Format: [callDataLength(32 bytes)][callData][nonce(32 bytes)][...]
         uint256 callDataLength = uint256(bytes32(sig[0:32]));
 
-        // Validate signature has enough data
-        if (sig.length < 64 + callDataLength) return SIG_VALIDATION_FAILED_UINT;
+        // Validate signature has enough data (check callDataLength first to prevent overflow)
+        if (callDataLength > sig.length || sig.length < 64 + callDataLength) return SIG_VALIDATION_FAILED_UINT;
 
         bytes calldata proposalCallData = sig[32:32 + callDataLength];
         uint256 proposalNonce = uint256(bytes32(sig[32 + callDataLength:64 + callDataLength]));
@@ -380,7 +376,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         TimelockConfig storage config = timelockConfig[id][account];
         if (!config.initialized) return SIG_VALIDATION_FAILED_UINT;
 
-        // Check if this is a proposal approval (or create+approve) request
+        // Check if this is a proposal creation request
         // Criteria: calldata is a no-op AND signature has proposal data (length >= 65)
         if (_isNoOpCalldata(userOp.callData) && sig.length >= 65) {
             return _handleProposalCreationInternal(id, userOp, config, sig, account);
