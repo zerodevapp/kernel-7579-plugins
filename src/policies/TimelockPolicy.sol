@@ -281,6 +281,10 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         // ABI layout: 4 (selector) + 32 (mode) + 32 (offset) + 32 (length) + data
         if (callData.length < 100) return false;
 
+        // Only accept single call mode (callType = first byte of mode must be 0x00).
+        // Prevents delegatecall (0xFE) or batch (0x01) payloads from being treated as no-ops.
+        if (callData[4] != 0x00) return false;
+
         // Offset to executionCalldata: 2 head slots (mode + offset) = 64
         uint256 offset = uint256(bytes32(callData[36:68]));
         if (offset != 64) return false;
@@ -314,12 +318,12 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
      */
     function _isNoOpExecuteUserOp(bytes calldata callData) internal pure returns (bool) {
         // executeUserOp(bytes calldata userOp, bytes32 userOpHash)
-        // Format: 4 (selector) + 32 (userOp offset) + 32 (userOpHash) + 32 (userOp length) + userOp data
+        // Format: 4 (selector) + 32 (userOp offset=64) + 32 (userOpHash) + 32 (userOp length) + userOp data
         if (callData.length < 100) return false;
 
-        // Decode offset to userOp data (should be 32)
+        // Decode offset to userOp data (should be 64: past 2 head slots)
         uint256 offset = uint256(bytes32(callData[4:36]));
-        if (offset != 32) return false;
+        if (offset != 64) return false;
 
         // userOpHash is at bytes 36-68 (we don't validate it)
 

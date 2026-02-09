@@ -825,6 +825,40 @@ contract TimelockTest is Test {
         assertEq(result, SIG_VALIDATION_FAILED, "Non-empty inner calldata should not be noop");
     }
 
+    function test_GivenModeIsDelegatecall() external whenDetectingERC7579ExecuteNoop {
+        // it should not be detected as noop (delegatecall mode 0xFE)
+        // Mode with callType=0xFE (delegatecall) should be rejected
+        bytes32 delegatecallMode = bytes32(uint256(0xFE) << 248);
+        bytes memory executionCalldata = abi.encodePacked(bytes20(WALLET), uint256(0));
+
+        bytes memory callData =
+            abi.encodeWithSelector(IERC7579Execution.execute.selector, delegatecallMode, executionCalldata);
+
+        bytes memory sig = _createProposalSignature("proposal", 3);
+        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, sig);
+
+        vm.prank(WALLET);
+        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
+
+        assertEq(result, SIG_VALIDATION_FAILED, "Delegatecall mode should not be noop");
+    }
+
+    function test_GivenModeIsBatch() external whenDetectingERC7579ExecuteNoop {
+        // it should not be detected as noop (batch mode 0x01)
+        bytes32 batchMode = bytes32(uint256(0x01) << 248);
+        bytes memory executionCalldata = abi.encodePacked(bytes20(WALLET), uint256(0));
+
+        bytes memory callData =
+            abi.encodeWithSelector(IERC7579Execution.execute.selector, batchMode, executionCalldata);
+
+        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, "");
+
+        vm.prank(WALLET);
+        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
+
+        assertEq(result, SIG_VALIDATION_FAILED, "Batch mode should not be noop");
+    }
+
     // ============ _isNoOpExecuteUserOp Tests ============
 
     modifier whenDetectingExecuteUserOpNoop() {
@@ -833,11 +867,11 @@ contract TimelockTest is Test {
 
     function test_GivenUserOpDataIsEmpty() external whenDetectingExecuteUserOpNoop {
         // it should be detected as noop
-        bytes memory callData = abi.encodePacked(
+        // Use encodeWithSelector to guarantee proper ABI encoding
+        bytes memory callData = abi.encodeWithSelector(
             IAccountExecute.executeUserOp.selector,
-            bytes32(uint256(32)), // offset to userOp
-            bytes32(0), // userOpHash
-            bytes32(uint256(0)) // userOp length = 0
+            "", // empty bytes userOp
+            bytes32(0) // userOpHash
         );
 
         bytes memory sig = _createProposalSignature("proposal", 2);
@@ -864,11 +898,11 @@ contract TimelockTest is Test {
         assertEq(result, SIG_VALIDATION_FAILED, "Too short executeUserOp should not be noop");
     }
 
-    function test_GivenOffsetIsNot32_WhenDetectingExecuteUserOpNoop() external whenDetectingExecuteUserOpNoop {
+    function test_GivenOffsetIsNot64_WhenDetectingExecuteUserOpNoop() external whenDetectingExecuteUserOpNoop {
         // it should not be detected as noop
         bytes memory callData = abi.encodePacked(
             IAccountExecute.executeUserOp.selector,
-            bytes32(uint256(64)), // wrong offset
+            bytes32(uint256(32)), // wrong offset (should be 64)
             bytes32(0),
             bytes32(uint256(0))
         );
