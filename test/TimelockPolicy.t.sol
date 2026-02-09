@@ -11,6 +11,7 @@ import "forge-std/console.sol";
 contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, StatelessValidatorWithSenderTestBase {
     uint48 delay = 1 days;
     uint48 expirationPeriod = 1 days;
+    uint48 gracePeriod = 1 hours;
 
     function deployModule() internal virtual override returns (IModule) {
         return new TimelockPolicy();
@@ -19,7 +20,7 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
     function _initializeTest() internal override {}
 
     function installData() internal view override returns (bytes memory) {
-        return abi.encode(delay, expirationPeriod);
+        return abi.encode(delay, expirationPeriod, gracePeriod);
     }
 
     function validUserOp() internal view virtual override returns (PackedUserOperation memory) {
@@ -114,7 +115,7 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
         (, bytes memory sig) = statelessValidationSignature(message, false);
 
-        bytes memory data = abi.encode(uint48(0), uint48(0));
+        bytes memory data = abi.encode(uint48(0), uint48(0), uint48(0));
 
         vm.startPrank(WALLET);
         vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
@@ -142,7 +143,7 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
         (address caller, bytes memory sig) = statelessValidationSignatureWithSender(message, false);
 
-        bytes memory data = abi.encode(uint48(0), uint48(0));
+        bytes memory data = abi.encode(uint48(0), uint48(0), uint48(0));
 
         vm.startPrank(WALLET);
         vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
@@ -191,8 +192,8 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         policyModule.checkUserOpPolicy(policyId(), noopOp);
         vm.stopPrank();
 
-        // Fast forward past the delay
-        vm.warp(block.timestamp + delay + 1);
+        // Fast forward past the delay AND grace period
+        vm.warp(block.timestamp + delay + gracePeriod + 1);
 
         // Now execute the proposal
         vm.startPrank(WALLET);
@@ -280,13 +281,14 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
 
         assertEq(result, 0);
 
-        // Verify proposal was created as Pending with timing
-        (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 validUntil) =
+        // Verify proposal was created
+        (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 graceEnd, uint256 validUntil) =
             policyModule.getProposal(WALLET, callData, nonce, policyId(), WALLET);
 
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending));
-        assertGt(validAfter, 0);
-        assertGt(validUntil, validAfter);
+        assertEq(validAfter, block.timestamp + delay);
+        assertEq(graceEnd, block.timestamp + delay + gracePeriod);
+        assertEq(validUntil, block.timestamp + delay + gracePeriod + expirationPeriod);
     }
 
     function testCancelProposal() public {
@@ -322,7 +324,7 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         vm.stopPrank();
 
         // Verify proposal was cancelled
-        (TimelockPolicy.ProposalStatus status,,) = policyModule.getProposal(WALLET, callData, nonce, policyId(), WALLET);
+        (TimelockPolicy.ProposalStatus status,,,) = policyModule.getProposal(WALLET, callData, nonce, policyId(), WALLET);
 
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Cancelled));
     }
@@ -363,8 +365,8 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         // Returns success (validationData = 0) for state persistence
         assertEq(result, 0);
 
-        // Verify proposal was created as Pending with timing
-        (TimelockPolicy.ProposalStatus status,,) =
+        // Verify proposal was created
+        (TimelockPolicy.ProposalStatus status,,,) =
             policyModule.getProposal(WALLET, proposalCallData, proposalNonce, policyId(), WALLET);
 
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending));
@@ -417,5 +419,93 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
 
         // Should fail (return 1 = SIG_VALIDATION_FAILED_UINT) because proposal is from previous epoch
         assertEq(validationResult, 1);
+    }
+
+    // Test that execution cannot happen during grace period (race condition prevention)
+    function testExecutionBlockedDuringGracePeriod() public {
+        TimelockPolicy policyModule = TimelockPolicy(address(module));
+        vm.startPrank(WALLET);
+        policyModule.onInstall(abi.encodePacked(policyId(), installData()));
+        vm.stopPrank();
+
+        PackedUserOperation memory userOp = validUserOp();
+
+        // Create a proposal via no-op UserOp
+        bytes memory sig =
+            abi.encodePacked(bytes32(userOp.callData.length), userOp.callData, bytes32(userOp.nonce), bytes1(0x00));
+        PackedUserOperation memory noopOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
+        vm.startPrank(WALLET);
+        policyModule.checkUserOpPolicy(policyId(), noopOp);
+        vm.stopPrank();
+
+        // Fast forward past delay but NOT past grace period
+        vm.warp(block.timestamp + delay + 1);
+
+        // Try to execute the proposal
+        vm.startPrank(WALLET);
+        uint256 validationResult = policyModule.checkUserOpPolicy(policyId(), userOp);
+        vm.stopPrank();
+
+        // Validation should succeed but with graceEnd as validAfter
+        // The EntryPoint would reject execution during grace period
+        assertFalse(validationResult == 1); // Not a failure
+
+        // Extract validAfter from packed validation data
+        // Format: <validAfter (6 bytes)><validUntil (6 bytes)><authorizer (20 bytes)>
+        uint48 returnedValidAfter = uint48(validationResult >> 208);
+
+        // validAfter should be graceEnd (delay + gracePeriod), not just delay
+        assertEq(returnedValidAfter, uint48(block.timestamp - 1 + gracePeriod));
+    }
+
+    // Test that owner can still cancel during grace period
+    function testCancelDuringGracePeriod() public {
+        TimelockPolicy policyModule = TimelockPolicy(address(module));
+        vm.startPrank(WALLET);
+        policyModule.onInstall(abi.encodePacked(policyId(), installData()));
+        vm.stopPrank();
+
+        bytes memory callData = hex"1234";
+        uint256 nonce = 1;
+
+        // Create proposal via no-op UserOp
+        bytes memory sig =
+            abi.encodePacked(bytes32(callData.length), callData, bytes32(nonce), bytes1(0x00));
+        PackedUserOperation memory noopOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
+        vm.startPrank(WALLET);
+        policyModule.checkUserOpPolicy(policyId(), noopOp);
+        vm.stopPrank();
+
+        // Fast forward past delay but still in grace period
+        vm.warp(block.timestamp + delay + 1);
+
+        // Cancel proposal (should still work during grace period)
+        vm.startPrank(WALLET);
+        policyModule.cancelProposal(policyId(), WALLET, callData, nonce);
+        vm.stopPrank();
+
+        // Verify proposal was cancelled
+        (TimelockPolicy.ProposalStatus status,,,) = policyModule.getProposal(WALLET, callData, nonce, policyId(), WALLET);
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Cancelled));
     }
 }
