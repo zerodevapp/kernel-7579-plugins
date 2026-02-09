@@ -208,7 +208,7 @@ contract TimelockTest is Test {
         bytes32 expectedKey = keccak256(abi.encode(WALLET, keccak256(callData), nonce));
 
         vm.expectEmit(true, true, true, true);
-        emit TimelockPolicy.ProposalCreated(WALLET, POLICY_ID, expectedKey, 0, 0);
+        emit TimelockPolicy.ProposalCreated(WALLET, POLICY_ID, expectedKey, address(this), 0, 0);
 
         timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
 
@@ -362,6 +362,7 @@ contract TimelockTest is Test {
             WALLET,
             POLICY_ID,
             expectedKey,
+            WALLET,
             uint48(block.timestamp) + DELAY,
             uint48(block.timestamp) + DELAY + EXPIRATION
         );

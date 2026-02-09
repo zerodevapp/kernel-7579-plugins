@@ -51,7 +51,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
     mapping(bytes32 => mapping(bytes32 => mapping(address => Proposal))) public proposals;
 
     event ProposalCreated(
-        address indexed wallet, bytes32 indexed id, bytes32 indexed proposalHash, uint256 validAfter, uint256 validUntil
+        address indexed wallet, bytes32 indexed id, bytes32 indexed proposalHash, address proposer, uint256 validAfter, uint256 validUntil
     );
 
     event ProposalApproved(
@@ -148,7 +148,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         proposals[userOpKey][id][account] =
             Proposal({status: ProposalStatus.Proposed, validAfter: 0, validUntil: 0, epoch: currentEpoch[id][account]});
 
-        emit ProposalCreated(account, id, userOpKey, 0, 0);
+        emit ProposalCreated(account, id, userOpKey, msg.sender, 0, 0);
     }
 
     /**
@@ -251,7 +251,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
                 epoch: currentEpoch[id][account]
             });
 
-            emit ProposalCreated(account, id, userOpKey, validAfter, validUntil);
+            emit ProposalCreated(account, id, userOpKey, account, validAfter, validUntil);
             return _packValidationData(0, 0);
         } else {
             // Proposal exists in wrong state (Pending, Executed, Cancelled)
