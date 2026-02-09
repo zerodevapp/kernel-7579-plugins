@@ -21,8 +21,7 @@ import {
 contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorWithSender {
     enum ProposalStatus {
         None, // Proposal doesn't exist
-        Proposed, // Proposal created but not yet approved (inert, no clock)
-        Pending, // Proposal approved, clock started, waiting for timelock
+        Pending, // Clock started, waiting for timelock
         Executed, // Proposal executed
         Cancelled // Proposal cancelled
     }
@@ -51,10 +50,6 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
     mapping(bytes32 => mapping(bytes32 => mapping(address => Proposal))) public proposals;
 
     event ProposalCreated(
-        address indexed wallet, bytes32 indexed id, bytes32 indexed proposalHash, address proposer, uint256 validAfter, uint256 validUntil
-    );
-
-    event ProposalApproved(
         address indexed wallet, bytes32 indexed id, bytes32 indexed proposalHash, uint256 validAfter, uint256 validUntil
     );
 
@@ -67,7 +62,6 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
     error InvalidDelay();
     error InvalidExpirationPeriod();
     error ProposalNotFound();
-    error ProposalAlreadyExists();
     error TimelockNotExpired(uint256 validAfter, uint256 currentTime);
     error ProposalExpired(uint256 validUntil, uint256 currentTime);
     error ProposalNotPending();
@@ -123,35 +117,6 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
     }
 
     /**
-     * @notice Create a proposal for time-delayed execution
-     * @dev Anyone can create a proposal. The proposal is inert until approved by the
-     *      session key holder via a no-op UserOp. The timelock clock does not start
-     *      until approval, so spam proposals can be safely ignored.
-     * @param id The policy ID
-     * @param account The account address
-     * @param callData The calldata for the future operation
-     * @param nonce The nonce for the future operation
-     */
-    function createProposal(bytes32 id, address account, bytes calldata callData, uint256 nonce) external {
-        TimelockConfig storage config = timelockConfig[id][account];
-        if (!config.initialized) revert IModule.NotInitialized(account);
-
-        // Create userOp key for storage lookup
-        bytes32 userOpKey = keccak256(abi.encode(account, keccak256(callData), nonce));
-
-        // Check proposal doesn't already exist
-        if (proposals[userOpKey][id][account].status != ProposalStatus.None) {
-            revert ProposalAlreadyExists();
-        }
-
-        // Create INERT proposal — clock does NOT start until approved via UserOp
-        proposals[userOpKey][id][account] =
-            Proposal({status: ProposalStatus.Proposed, validAfter: 0, validUntil: 0, epoch: currentEpoch[id][account]});
-
-        emit ProposalCreated(account, id, userOpKey, msg.sender, 0, 0);
-    }
-
-    /**
      * @notice Cancel a pending proposal
      * @dev Only the account itself can cancel proposals to prevent griefing
      * @param id The policy ID
@@ -170,7 +135,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         bytes32 userOpKey = keccak256(abi.encode(account, keccak256(callData), nonce));
 
         Proposal storage proposal = proposals[userOpKey][id][account];
-        if (proposal.status != ProposalStatus.Pending && proposal.status != ProposalStatus.Proposed) {
+        if (proposal.status != ProposalStatus.Pending) {
             revert ProposalNotPending();
         }
 
@@ -200,13 +165,12 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
     }
 
     /**
-     * @notice Handle proposal approval (or create+approve) from userOp
-     * @dev Called when the session key holder submits a no-op UserOp.
-     *      If a matching inert proposal exists (Proposed status), approves it and starts the clock.
-     *      If no proposal exists, creates and approves in one step.
+     * @notice Handle proposal creation from a no-op UserOp
+     * @dev Called when the session key holder submits a no-op UserOp with proposal data in the signature.
+     *      Creates a new Pending proposal with the timelock clock started.
      *      Signature format: [callDataLength(32)][callData][nonce(32)][remaining sig data]
      */
-    function _handleProposalApprovalInternal(
+    function _handleProposalCreationInternal(
         bytes32 id,
         PackedUserOperation calldata userOp,
         TimelockConfig storage config,
@@ -223,40 +187,28 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         bytes calldata proposalCallData = sig[32:32 + callDataLength];
         uint256 proposalNonce = uint256(bytes32(sig[32 + callDataLength:64 + callDataLength]));
 
-        // Calculate proposal timing (clock starts NOW)
-        uint48 validAfter = uint48(block.timestamp) + config.delay;
-        uint48 validUntil = validAfter + config.expirationPeriod;
-
         // Create userOp key for storage lookup (using PROPOSAL calldata and nonce, not current userOp)
         bytes32 userOpKey = keccak256(abi.encode(userOp.sender, keccak256(proposalCallData), proposalNonce));
 
         Proposal storage proposal = proposals[userOpKey][id][account];
 
-        if (proposal.status == ProposalStatus.Proposed) {
-            // Approve existing inert proposal — start the clock
-            if (proposal.epoch != currentEpoch[id][account]) return SIG_VALIDATION_FAILED_UINT;
-
-            proposal.status = ProposalStatus.Pending;
-            proposal.validAfter = validAfter;
-            proposal.validUntil = validUntil;
-
-            emit ProposalApproved(account, id, userOpKey, validAfter, validUntil);
-            return _packValidationData(0, 0);
-        } else if (proposal.status == ProposalStatus.None) {
-            // Create + approve in one step (session key holder creating directly)
-            proposals[userOpKey][id][account] = Proposal({
-                status: ProposalStatus.Pending,
-                validAfter: validAfter,
-                validUntil: validUntil,
-                epoch: currentEpoch[id][account]
-            });
-
-            emit ProposalCreated(account, id, userOpKey, account, validAfter, validUntil);
-            return _packValidationData(0, 0);
-        } else {
-            // Proposal exists in wrong state (Pending, Executed, Cancelled)
+        if (proposal.status != ProposalStatus.None) {
             return SIG_VALIDATION_FAILED_UINT;
         }
+
+        // Calculate proposal timing (clock starts NOW)
+        uint48 validAfter = uint48(block.timestamp) + config.delay;
+        uint48 validUntil = validAfter + config.expirationPeriod;
+
+        proposals[userOpKey][id][account] = Proposal({
+            status: ProposalStatus.Pending,
+            validAfter: validAfter,
+            validUntil: validUntil,
+            epoch: currentEpoch[id][account]
+        });
+
+        emit ProposalCreated(account, id, userOpKey, validAfter, validUntil);
+        return _packValidationData(0, 0);
     }
 
     /**
@@ -393,12 +345,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
      * @notice Check signature against timelock policy (for ERC-1271)
      * @dev TimelockPolicy does not support ERC-1271 signature validation - always reverts
      */
-    function checkSignaturePolicy(bytes32, address, bytes32, bytes calldata)
-        external
-        pure
-        override
-        returns (uint256)
-    {
+    function checkSignaturePolicy(bytes32, address, bytes32, bytes calldata) external pure override returns (uint256) {
         revert("TimelockPolicy: signature validation not supported");
     }
 
@@ -436,7 +383,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         // Check if this is a proposal approval (or create+approve) request
         // Criteria: calldata is a no-op AND signature has proposal data (length >= 65)
         if (_isNoOpCalldata(userOp.callData) && sig.length >= 65) {
-            return _handleProposalApprovalInternal(id, userOp, config, sig, account);
+            return _handleProposalCreationInternal(id, userOp, config, sig, account);
         }
 
         // Otherwise, this is a proposal execution request

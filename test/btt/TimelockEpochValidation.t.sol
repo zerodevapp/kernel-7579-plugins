@@ -44,8 +44,21 @@ contract TimelockEpochValidationTest is Test {
     }
 
     function _createProposal(address wallet, bytes32 policyId, bytes memory callData, uint256 nonce) internal {
+        // Create proposal via no-op UserOp (creates Pending directly with clock started)
+        bytes memory sig = abi.encodePacked(bytes32(callData.length), callData, bytes32(nonce), bytes1(0x00));
+        PackedUserOperation memory noopOp = PackedUserOperation({
+            sender: wallet,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
         vm.prank(wallet);
-        timelockPolicy.createProposal(policyId, wallet, callData, nonce);
+        timelockPolicy.checkUserOpPolicy(policyId, noopOp);
     }
 
     function _createUserOp(address sender, bytes memory callData, uint256 nonce)
@@ -64,23 +77,6 @@ contract TimelockEpochValidationTest is Test {
             paymasterAndData: "",
             signature: ""
         });
-    }
-
-    function _approveProposal(address wallet, bytes32 policyId, bytes memory callData, uint256 nonce) internal {
-        bytes memory sig = abi.encodePacked(bytes32(callData.length), callData, bytes32(nonce), bytes1(0x00));
-        PackedUserOperation memory noopOp = PackedUserOperation({
-            sender: wallet,
-            nonce: 0,
-            initCode: "",
-            callData: "",
-            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
-            preVerificationGas: 0,
-            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
-            paymasterAndData: "",
-            signature: sig
-        });
-        vm.prank(wallet);
-        timelockPolicy.checkUserOpPolicy(policyId, noopOp);
     }
 
     // ==================== Installing the Policy ====================
@@ -102,8 +98,7 @@ contract TimelockEpochValidationTest is Test {
         assertEq(epochAfter, 1, "Epoch should be 1 after first install");
 
         // it should initialize the policy config
-        (uint48 delay, uint48 expirationPeriod, bool initialized) =
-            timelockPolicy.timelockConfig(POLICY_ID_1, WALLET);
+        (uint48 delay, uint48 expirationPeriod, bool initialized) = timelockPolicy.timelockConfig(POLICY_ID_1, WALLET);
         assertTrue(initialized, "Policy should be initialized");
         assertEq(delay, DELAY, "Delay should match");
         assertEq(expirationPeriod, EXPIRATION_PERIOD, "Expiration period should match");
@@ -167,22 +162,18 @@ contract TimelockEpochValidationTest is Test {
         _createProposal(WALLET, POLICY_ID_1, callData, nonce);
 
         // it should store the current epoch in the proposal
-        // it should be in Proposed (inert) status with no timing
+        // it should be in Pending status with timing set
         bytes32 userOpKey = timelockPolicy.computeUserOpKey(WALLET, callData, nonce);
-        (
-            TimelockPolicy.ProposalStatus status,
-            uint48 validAfter,
-            uint48 validUntil,
-            uint256 proposalEpoch
-        ) = timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
+        (TimelockPolicy.ProposalStatus status, uint48 validAfter, uint48 validUntil, uint256 proposalEpoch) =
+            timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
 
-        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Proposed), "Proposal should be Proposed (inert)");
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should be Pending");
         assertEq(proposalEpoch, 1, "Proposal epoch should match current epoch (1)");
-        assertEq(validAfter, 0, "validAfter should be 0 (inert)");
-        assertEq(validUntil, 0, "validUntil should be 0 (inert)");
+        assertGt(validAfter, 0, "validAfter should be set");
+        assertGt(validUntil, validAfter, "validUntil should be after validAfter");
     }
 
-    function test_GivenCreatingViaCreateProposalFunction() external whenCreatingAProposal {
+    function test_GivenCreatingViaNoOpUserOp() external whenCreatingAProposal {
         _installPolicy(WALLET, POLICY_ID_1);
 
         bytes memory callData = hex"5678";
@@ -192,11 +183,12 @@ contract TimelockEpochValidationTest is Test {
 
         _createProposal(WALLET, POLICY_ID_1, callData, nonce);
 
-        // it should record the epoch at creation time (proposal is inert)
+        // it should record the epoch at creation time (proposal is Pending)
         bytes32 userOpKey = timelockPolicy.computeUserOpKey(WALLET, callData, nonce);
-        (TimelockPolicy.ProposalStatus status,,, uint256 proposalEpoch) = timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
+        (TimelockPolicy.ProposalStatus status,,, uint256 proposalEpoch) =
+            timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
 
-        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Proposed), "Should be Proposed");
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Should be Pending");
         assertEq(proposalEpoch, epoch, "Proposal epoch should equal current epoch at creation");
     }
 
@@ -220,10 +212,8 @@ contract TimelockEpochValidationTest is Test {
         bytes memory callData = hex"1234";
         uint256 nonce = 1;
 
+        // Create proposal via no-op UserOp (creates Pending directly with clock started)
         _createProposal(WALLET, POLICY_ID_1, callData, nonce);
-
-        // Approve the proposal (starts the clock)
-        _approveProposal(WALLET, POLICY_ID_1, callData, nonce);
 
         // Warp past the timelock delay
         vm.warp(block.timestamp + DELAY + 1);
@@ -248,11 +238,8 @@ contract TimelockEpochValidationTest is Test {
         bytes memory callData = hex"1234";
         uint256 nonce = 1;
 
-        // Create proposal in epoch 1 (inert)
+        // Create proposal via no-op UserOp (Pending with clock started, epoch 1)
         _createProposal(WALLET, POLICY_ID_1, callData, nonce);
-
-        // Approve the proposal (starts the clock, epoch 1)
-        _approveProposal(WALLET, POLICY_ID_1, callData, nonce);
 
         // Warp past the timelock delay
         vm.warp(block.timestamp + DELAY + 1);
@@ -282,9 +269,8 @@ contract TimelockEpochValidationTest is Test {
         bytes memory callData = hex"abcd";
         uint256 nonce = 5;
 
-        // Create and approve proposal in epoch 1
+        // Create proposal via no-op UserOp in epoch 1 (Pending with clock started)
         _createProposal(WALLET, POLICY_ID_1, callData, nonce);
-        _approveProposal(WALLET, POLICY_ID_1, callData, nonce);
 
         bytes32 userOpKey = timelockPolicy.computeUserOpKey(WALLET, callData, nonce);
         (,,, uint256 proposalEpoch) = timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
@@ -363,9 +349,8 @@ contract TimelockEpochValidationTest is Test {
         bytes memory callData = hex"1234";
         uint256 nonce = 1;
 
-        // Create and approve in epoch 1
+        // Create proposal via no-op UserOp in epoch 1 (Pending with clock started)
         _createProposal(WALLET, POLICY_ID_1, callData, nonce);
-        _approveProposal(WALLET, POLICY_ID_1, callData, nonce);
 
         uint256 epochBeforeUninstall = timelockPolicy.currentEpoch(POLICY_ID_1, WALLET);
 
@@ -386,7 +371,7 @@ contract TimelockEpochValidationTest is Test {
         uint256 validationResult = timelockPolicy.checkUserOpPolicy(POLICY_ID_1, userOp);
         assertEq(validationResult, SIG_VALIDATION_FAILED_UINT, "Old proposal should be invalid");
 
-        // it should allow new proposals with new epoch (Proposed status)
+        // it should allow new proposals with new epoch (Pending status)
         bytes memory newCallData = hex"5678";
         uint256 newNonce = 2;
 
@@ -396,7 +381,7 @@ contract TimelockEpochValidationTest is Test {
         (TimelockPolicy.ProposalStatus status,,, uint256 newProposalEpoch) =
             timelockPolicy.proposals(newUserOpKey, POLICY_ID_1, WALLET);
 
-        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Proposed), "New proposal should be Proposed");
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "New proposal should be Pending");
         assertEq(newProposalEpoch, epochAfterReinstall, "New proposal should have current epoch");
     }
 
@@ -456,35 +441,26 @@ contract TimelockEpochValidationTest is Test {
         _;
     }
 
-    function test_WhenAttackerTriesToExecuteOldProposal() external whenVerifyingFullAttackScenario {
+    function test_WhenAttackerCannotCreateProposalsDirectly() external whenVerifyingFullAttackScenario {
         // User installs policy
         _installPolicy(WALLET, POLICY_ID_1);
         assertEq(timelockPolicy.currentEpoch(POLICY_ID_1, WALLET), 1, "Should start at epoch 1");
 
-        // Attacker creates malicious proposal
+        // Without createProposal, an attacker cannot create proposals for WALLET.
+        // The only way to create a proposal is via checkUserOpPolicy which requires
+        // msg.sender == WALLET (the account itself). So there is no external attack vector.
+
+        // Verify that trying to execute a non-existent proposal fails
         bytes memory maliciousCallData = hex"deadbeef";
         uint256 maliciousNonce = 666;
 
-        vm.prank(ATTACKER);
-        timelockPolicy.createProposal(POLICY_ID_1, WALLET, maliciousCallData, maliciousNonce);
-
-        // Time passes, timelock expires
-        vm.warp(block.timestamp + DELAY + 1);
-
-        // User decides to uninstall and reinstall
-        _uninstallPolicy(WALLET, POLICY_ID_1);
-        _installPolicy(WALLET, POLICY_ID_1);
-
-        assertEq(timelockPolicy.currentEpoch(POLICY_ID_1, WALLET), 2, "Should be at epoch 2");
-
-        // Attacker tries to execute the old proposal
         PackedUserOperation memory maliciousUserOp = _createUserOp(WALLET, maliciousCallData, maliciousNonce);
 
         vm.prank(WALLET);
         uint256 validationResult = timelockPolicy.checkUserOpPolicy(POLICY_ID_1, maliciousUserOp);
 
-        // it should fail due to epoch mismatch
-        assertEq(validationResult, SIG_VALIDATION_FAILED_UINT, "Attack should be thwarted by epoch check");
+        // it should fail because no proposal exists
+        assertEq(validationResult, SIG_VALIDATION_FAILED_UINT, "Non-existent proposal should fail");
     }
 
     function test_WhenUserCreatesNewProposalAfterReinstall() external whenVerifyingFullAttackScenario {
@@ -495,11 +471,10 @@ contract TimelockEpochValidationTest is Test {
         _uninstallPolicy(WALLET, POLICY_ID_1);
         _installPolicy(WALLET, POLICY_ID_1);
 
-        // User creates and approves legitimate proposal with new epoch
+        // User creates legitimate proposal via no-op UserOp with new epoch
         bytes memory callData = hex"abcd";
         uint256 userNonce = 200;
         _createProposal(WALLET, POLICY_ID_1, callData, userNonce);
-        _approveProposal(WALLET, POLICY_ID_1, callData, userNonce);
 
         vm.warp(block.timestamp + DELAY + 1);
 
@@ -517,14 +492,12 @@ contract TimelockEpochValidationTest is Test {
         _installPolicy(WALLET, POLICY_ID_1);
         _installPolicy(WALLET2, POLICY_ID_1);
 
-        // Both users create and approve proposals
+        // Both users create proposals via no-op UserOp
         bytes memory callData1 = hex"1111";
         bytes memory callData2 = hex"2222";
 
         _createProposal(WALLET, POLICY_ID_1, callData1, 1);
-        _approveProposal(WALLET, POLICY_ID_1, callData1, 1);
         _createProposal(WALLET2, POLICY_ID_1, callData2, 1);
-        _approveProposal(WALLET2, POLICY_ID_1, callData2, 1);
 
         vm.warp(block.timestamp + DELAY + 1);
 
