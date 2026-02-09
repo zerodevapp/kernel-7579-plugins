@@ -26,6 +26,7 @@ contract TimelockTest is Test {
 
     uint48 public constant DELAY = 1 hours;
     uint48 public constant EXPIRATION = 1 days;
+    uint48 public constant GRACE_PERIOD = 30 minutes;
 
     uint256 public constant SIG_VALIDATION_FAILED = 1;
 
@@ -33,7 +34,7 @@ contract TimelockTest is Test {
         timelockPolicy = new TimelockPolicy();
 
         // Install policy for WALLET
-        bytes memory installData = abi.encode(POLICY_ID, DELAY, EXPIRATION);
+        bytes memory installData = abi.encode(POLICY_ID, DELAY, EXPIRATION, GRACE_PERIOD);
         vm.prank(WALLET);
         timelockPolicy.onInstall(installData);
     }
@@ -102,13 +103,13 @@ contract TimelockTest is Test {
         bytes32 newId = bytes32(uint256(2));
 
         vm.expectEmit(true, true, true, true);
-        emit TimelockPolicy.TimelockConfigUpdated(newWallet, newId, 2 hours, 2 days);
+        emit TimelockPolicy.TimelockConfigUpdated(newWallet, newId, 2 hours, 2 days, 30 minutes);
 
-        bytes memory installData = abi.encode(newId, uint48(2 hours), uint48(2 days));
+        bytes memory installData = abi.encode(newId, uint48(2 hours), uint48(2 days), uint48(30 minutes));
         vm.prank(newWallet);
         timelockPolicy.onInstall(installData);
 
-        (uint48 delay, uint48 expiration, bool initialized) = timelockPolicy.timelockConfig(newId, newWallet);
+        (uint48 delay, uint48 expiration, uint48 gracePeriod_, bool initialized) = timelockPolicy.timelockConfig(newId, newWallet);
         assertEq(delay, 2 hours, "Delay should be stored");
         assertEq(expiration, 2 days, "Expiration should be stored");
         assertTrue(initialized, "Should be initialized");
@@ -116,7 +117,7 @@ contract TimelockTest is Test {
 
     function test_GivenAlreadyInitialized() external whenCallingOnInstall {
         // it should revert with AlreadyInitialized
-        bytes memory installData = abi.encode(POLICY_ID, DELAY, EXPIRATION);
+        bytes memory installData = abi.encode(POLICY_ID, DELAY, EXPIRATION, GRACE_PERIOD);
         vm.prank(WALLET);
         vm.expectRevert(abi.encodeWithSelector(IModule.AlreadyInitialized.selector, WALLET));
         timelockPolicy.onInstall(installData);
@@ -125,7 +126,7 @@ contract TimelockTest is Test {
     function test_GivenDelayIsZero() external whenCallingOnInstall {
         // it should revert with InvalidDelay
         address newWallet = address(0x6666);
-        bytes memory installData = abi.encode(POLICY_ID, uint48(0), EXPIRATION);
+        bytes memory installData = abi.encode(POLICY_ID, uint48(0), EXPIRATION, GRACE_PERIOD);
         vm.prank(newWallet);
         vm.expectRevert(TimelockPolicy.InvalidDelay.selector);
         timelockPolicy.onInstall(installData);
@@ -134,7 +135,7 @@ contract TimelockTest is Test {
     function test_GivenExpirationIsZero() external whenCallingOnInstall {
         // it should revert with InvalidExpirationPeriod
         address newWallet = address(0x7777);
-        bytes memory installData = abi.encode(POLICY_ID, DELAY, uint48(0));
+        bytes memory installData = abi.encode(POLICY_ID, DELAY, uint48(0), GRACE_PERIOD);
         vm.prank(newWallet);
         vm.expectRevert(TimelockPolicy.InvalidExpirationPeriod.selector);
         timelockPolicy.onInstall(installData);
@@ -151,7 +152,7 @@ contract TimelockTest is Test {
         vm.prank(WALLET);
         timelockPolicy.onUninstall(abi.encode(POLICY_ID));
 
-        (,, bool initialized) = timelockPolicy.timelockConfig(POLICY_ID, WALLET);
+        (,,, bool initialized) = timelockPolicy.timelockConfig(POLICY_ID, WALLET);
         assertFalse(initialized, "Config should be cleared");
     }
 
@@ -210,17 +211,18 @@ contract TimelockTest is Test {
 
         vm.expectEmit(true, true, true, true);
         emit TimelockPolicy.ProposalCreated(
-            WALLET, POLICY_ID, expectedKey, uint48(createTime) + DELAY, uint48(createTime) + DELAY + EXPIRATION
+            WALLET, POLICY_ID, expectedKey, uint48(createTime) + DELAY, uint48(createTime) + DELAY + GRACE_PERIOD + EXPIRATION
         );
 
         timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
 
-        (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 validUntil) =
+        (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 graceEnd, uint256 validUntil) =
             timelockPolicy.getProposal(WALLET, callData, nonce, POLICY_ID, WALLET);
 
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Status should be Pending");
         assertEq(validAfter, createTime + DELAY, "validAfter should be timestamp + delay");
-        assertEq(validUntil, createTime + DELAY + EXPIRATION, "validUntil should be validAfter + expiration");
+        assertEq(graceEnd, createTime + DELAY + GRACE_PERIOD, "graceEnd should be validAfter + gracePeriod");
+        assertEq(validUntil, createTime + DELAY + GRACE_PERIOD + EXPIRATION, "validUntil should be graceEnd + expiration");
     }
 
     function test_GivenNotInitialized_WhenCallingCreateProposal() external whenCallingCreateProposal {
@@ -265,7 +267,7 @@ contract TimelockTest is Test {
         vm.prank(WALLET);
         timelockPolicy.cancelProposal(POLICY_ID, WALLET, callData, nonce);
 
-        (TimelockPolicy.ProposalStatus status,,) =
+        (TimelockPolicy.ProposalStatus status,,,) =
             timelockPolicy.getProposal(WALLET, callData, nonce, POLICY_ID, WALLET);
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Cancelled), "Status should be Cancelled");
     }
@@ -341,7 +343,7 @@ contract TimelockTest is Test {
             POLICY_ID,
             expectedKey,
             uint48(block.timestamp) + DELAY,
-            uint48(block.timestamp) + DELAY + EXPIRATION
+            uint48(block.timestamp) + DELAY + GRACE_PERIOD + EXPIRATION
         );
 
         vm.prank(WALLET);
@@ -350,7 +352,7 @@ contract TimelockTest is Test {
         // Proposal creation must return 0 for state persistence
         assertEq(result, 0, "Should return 0 for state persistence");
 
-        (TimelockPolicy.ProposalStatus status,,) =
+        (TimelockPolicy.ProposalStatus status,,,) =
             timelockPolicy.getProposal(WALLET, proposalCallData, proposalNonce, POLICY_ID, WALLET);
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should be created");
     }
@@ -424,7 +426,7 @@ contract TimelockTest is Test {
         timelockPolicy.createProposal(POLICY_ID, WALLET, proposalCallData, proposalNonce);
 
         // Get the actual stored proposal values
-        (, uint256 storedValidAfter, uint256 storedValidUntil) =
+        (, uint256 storedValidAfter, uint256 storedGraceEnd, uint256 storedValidUntil) =
             timelockPolicy.getProposal(WALLET, proposalCallData, proposalNonce, POLICY_ID, WALLET);
 
         vm.warp(block.timestamp + DELAY + 1);
@@ -440,12 +442,13 @@ contract TimelockTest is Test {
         uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, executeOp);
 
         // Extract validAfter and validUntil from packed data
+        // Note: packed validAfter is actually graceEnd (to prevent execution during grace period)
         uint48 validAfter = uint48(result >> 208);
         uint48 validUntil = uint48(result >> 160);
-        assertEq(validAfter, storedValidAfter, "validAfter should match proposal");
+        assertEq(validAfter, storedGraceEnd, "validAfter in packed data should match graceEnd");
         assertEq(validUntil, storedValidUntil, "validUntil should match proposal");
 
-        (TimelockPolicy.ProposalStatus status,,) =
+        (TimelockPolicy.ProposalStatus status,,,) =
             timelockPolicy.getProposal(WALLET, proposalCallData, proposalNonce, POLICY_ID, WALLET);
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Executed), "Proposal should be executed");
     }
@@ -612,30 +615,32 @@ contract TimelockTest is Test {
     }
 
     function test_GivenProposalExists() external whenCallingGetProposal {
-        // it should return status validAfter and validUntil
+        // it should return status validAfter graceEnd and validUntil
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 nonce = 1200;
 
         uint256 createTime = block.timestamp;
         timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
 
-        (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 validUntil) =
+        (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 graceEnd, uint256 validUntil) =
             timelockPolicy.getProposal(WALLET, callData, nonce, POLICY_ID, WALLET);
 
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Status should be Pending");
         assertEq(validAfter, createTime + DELAY, "validAfter should be correct");
-        assertEq(validUntil, createTime + DELAY + EXPIRATION, "validUntil should be correct");
+        assertEq(graceEnd, createTime + DELAY + GRACE_PERIOD, "graceEnd should be correct");
+        assertEq(validUntil, createTime + DELAY + GRACE_PERIOD + EXPIRATION, "validUntil should be correct");
     }
 
     function test_GivenProposalDoesNotExist_WhenCallingGetProposal() external whenCallingGetProposal {
         // it should return None status and zeros
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
 
-        (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 validUntil) =
+        (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 graceEnd, uint256 validUntil) =
             timelockPolicy.getProposal(WALLET, callData, 9999, POLICY_ID, WALLET);
 
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.None), "Status should be None");
         assertEq(validAfter, 0, "validAfter should be 0");
+        assertEq(graceEnd, 0, "graceEnd should be 0");
         assertEq(validUntil, 0, "validUntil should be 0");
     }
 
@@ -930,7 +935,7 @@ contract TimelockTest is Test {
         timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
 
         // Get the actual stored proposal values
-        (, uint256 storedValidAfter, uint256 storedValidUntil) =
+        (, uint256 storedValidAfter, uint256 storedGraceEnd, uint256 storedValidUntil) =
             timelockPolicy.getProposal(WALLET, callData, nonce, POLICY_ID, WALLET);
 
         vm.warp(block.timestamp + DELAY + 1);
@@ -940,7 +945,7 @@ contract TimelockTest is Test {
         vm.prank(WALLET);
         uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
 
-        uint256 expectedPacked = _packValidationData(uint48(storedValidAfter), uint48(storedValidUntil));
+        uint256 expectedPacked = _packValidationData(uint48(storedGraceEnd), uint48(storedValidUntil));
 
         assertEq(result, expectedPacked, "Packed validation data should match expected");
     }
@@ -978,10 +983,10 @@ contract TimelockTest is Test {
         vm.prank(WALLET);
         uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, executeOp);
 
-        // Extract validAfter - it should be in the future
+        // Extract validAfter from packed data - it's actually graceEnd, should be in the future
         uint48 validAfter = uint48(result >> 208);
         assertGt(validAfter, block.timestamp, "validAfter should be in the future");
-        assertEq(validAfter, uint48(createTime) + DELAY, "validAfter should be createTime + DELAY");
+        assertEq(validAfter, uint48(createTime) + DELAY + GRACE_PERIOD, "validAfter should be createTime + DELAY + GRACE_PERIOD (graceEnd)");
     }
 
     function test_GivenAttackerTriesToReexecuteAUsedProposal() external whenTestingSecurityScenarios {
@@ -1001,7 +1006,7 @@ contract TimelockTest is Test {
         assertNotEq(firstResult, SIG_VALIDATION_FAILED, "First execution should succeed");
 
         // Verify proposal is marked as executed
-        (TimelockPolicy.ProposalStatus status,,) =
+        (TimelockPolicy.ProposalStatus status,,,) =
             timelockPolicy.getProposal(WALLET, callData, nonce, POLICY_ID, WALLET);
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Executed), "Should be executed");
 
@@ -1026,7 +1031,7 @@ contract TimelockTest is Test {
         assertEq(result, 0, "Proposal creation must return 0 for state persistence");
 
         // Verify the proposal was actually created and persisted
-        (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 validUntil) =
+        (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 graceEnd, uint256 validUntil) =
             timelockPolicy.getProposal(WALLET, proposalCallData, proposalNonce, POLICY_ID, WALLET);
 
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal state should persist");
@@ -1046,7 +1051,7 @@ contract TimelockTest is Test {
         timelockPolicy.cancelProposal(POLICY_ID, WALLET, callData, nonce);
 
         // Verify proposal is still pending
-        (TimelockPolicy.ProposalStatus status,,) =
+        (TimelockPolicy.ProposalStatus status,,,) =
             timelockPolicy.getProposal(WALLET, callData, nonce, POLICY_ID, WALLET);
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should still be pending");
     }

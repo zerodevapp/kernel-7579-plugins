@@ -16,6 +16,7 @@ contract TimelockSignaturePolicyTest is Test {
 
     uint48 constant DELAY = 1 days;
     uint48 constant EXPIRATION_PERIOD = 1 days;
+    uint48 constant GRACE_PERIOD = 1 hours;
 
     bytes32 public policyId;
     bytes32 public testHash;
@@ -28,7 +29,7 @@ contract TimelockSignaturePolicyTest is Test {
 
     /// @notice Helper to install the policy for a wallet
     function _installPolicy(address wallet) internal {
-        bytes memory installData = abi.encode(DELAY, EXPIRATION_PERIOD);
+        bytes memory installData = abi.encode(DELAY, EXPIRATION_PERIOD, GRACE_PERIOD);
         vm.prank(wallet);
         timelockPolicy.onInstall(abi.encodePacked(policyId, installData));
     }
