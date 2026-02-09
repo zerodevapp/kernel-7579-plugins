@@ -173,9 +173,28 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
 
         PackedUserOperation memory userOp = validUserOp();
 
-        // First create a proposal
+        // First create a proposal (inert)
         vm.startPrank(WALLET);
         policyModule.createProposal(policyId(), WALLET, userOp.callData, userOp.nonce);
+        vm.stopPrank();
+
+        // Approve the proposal via no-op UserOp (starts the clock)
+        bytes memory sig = abi.encodePacked(
+            bytes32(userOp.callData.length), userOp.callData, bytes32(userOp.nonce), bytes1(0x00)
+        );
+        PackedUserOperation memory approveOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
+        vm.startPrank(WALLET);
+        policyModule.checkUserOpPolicy(policyId(), approveOp);
         vm.stopPrank();
 
         // Fast forward past the delay
@@ -251,13 +270,13 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         policyModule.createProposal(policyId(), WALLET, callData, nonce);
         vm.stopPrank();
 
-        // Verify proposal was created
+        // Verify proposal was created as inert (Proposed)
         (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 validUntil) =
             policyModule.getProposal(WALLET, callData, nonce, policyId(), WALLET);
 
-        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending));
-        assertEq(validAfter, block.timestamp + delay);
-        assertEq(validUntil, block.timestamp + delay + expirationPeriod);
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Proposed));
+        assertEq(validAfter, 0);
+        assertEq(validUntil, 0);
     }
 
     function testCancelProposal() public {
@@ -291,7 +310,7 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         policyModule.onInstall(abi.encodePacked(policyId(), installData()));
         vm.stopPrank();
 
-        // Create a proposal via checkUserOpPolicy with no-op calldata
+        // Create+approve a proposal via checkUserOpPolicy with no-op calldata
         bytes memory proposalCallData = hex"1234";
         uint256 proposalNonce = 1;
 
@@ -318,11 +337,10 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         uint256 result = policyModule.checkUserOpPolicy(policyId(), userOp);
         vm.stopPrank();
 
-        // Returns success (validationData = 0) - valid indefinitely per ERC-4337
-        // This allows proposal creation via UserOp without external caller
+        // Returns success (validationData = 0) for state persistence
         assertEq(result, 0);
 
-        // Verify proposal was created
+        // Verify proposal was created+approved (Pending with timing)
         (TimelockPolicy.ProposalStatus status,,) =
             policyModule.getProposal(WALLET, proposalCallData, proposalNonce, policyId(), WALLET);
 
@@ -338,9 +356,28 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
 
         PackedUserOperation memory userOp = validUserOp();
 
-        // Create a proposal
+        // Create and approve a proposal
         vm.startPrank(WALLET);
         policyModule.createProposal(policyId(), WALLET, userOp.callData, userOp.nonce);
+        vm.stopPrank();
+
+        // Approve via no-op UserOp
+        bytes memory sig = abi.encodePacked(
+            bytes32(userOp.callData.length), userOp.callData, bytes32(userOp.nonce), bytes1(0x00)
+        );
+        PackedUserOperation memory approveOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
+        vm.startPrank(WALLET);
+        policyModule.checkUserOpPolicy(policyId(), approveOp);
         vm.stopPrank();
 
         // Fast forward past delay

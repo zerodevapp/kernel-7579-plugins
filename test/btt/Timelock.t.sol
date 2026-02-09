@@ -199,28 +199,25 @@ contract TimelockTest is Test {
     }
 
     function test_GivenConfigIsInitializedAndProposalDoesNotExist() external whenCallingCreateProposal {
-        // it should store the proposal with pending status
-        // it should set correct validAfter and validUntil
-        // it should emit ProposalCreated
+        // it should store the proposal with Proposed (inert) status
+        // it should NOT set timing (validAfter = 0, validUntil = 0)
+        // it should emit ProposalCreated with zero timing
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 nonce = 100;
 
-        uint256 createTime = block.timestamp;
         bytes32 expectedKey = keccak256(abi.encode(WALLET, keccak256(callData), nonce));
 
         vm.expectEmit(true, true, true, true);
-        emit TimelockPolicy.ProposalCreated(
-            WALLET, POLICY_ID, expectedKey, uint48(createTime) + DELAY, uint48(createTime) + DELAY + EXPIRATION
-        );
+        emit TimelockPolicy.ProposalCreated(WALLET, POLICY_ID, expectedKey, 0, 0);
 
         timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
 
         (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 validUntil) =
             timelockPolicy.getProposal(WALLET, callData, nonce, POLICY_ID, WALLET);
 
-        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Status should be Pending");
-        assertEq(validAfter, createTime + DELAY, "validAfter should be timestamp + delay");
-        assertEq(validUntil, createTime + DELAY + EXPIRATION, "validUntil should be validAfter + expiration");
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Proposed), "Status should be Proposed");
+        assertEq(validAfter, 0, "validAfter should be 0 (inert)");
+        assertEq(validUntil, 0, "validUntil should be 0 (inert)");
     }
 
     function test_GivenNotInitialized_WhenCallingCreateProposal() external whenCallingCreateProposal {
@@ -249,13 +246,38 @@ contract TimelockTest is Test {
         _;
     }
 
-    function test_GivenCallerIsAccountAndProposalIsPending() external whenCallingCancelProposal {
-        // it should set status to cancelled
+    function test_GivenCallerIsAccountAndProposalIsProposed() external whenCallingCancelProposal {
+        // it should set status to cancelled (cancelling an inert Proposed proposal)
         // it should emit ProposalCancelled
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 nonce = 300;
 
         timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
+
+        bytes32 expectedKey = keccak256(abi.encode(WALLET, keccak256(callData), nonce));
+
+        vm.expectEmit(true, true, true, true);
+        emit TimelockPolicy.ProposalCancelled(WALLET, POLICY_ID, expectedKey);
+
+        vm.prank(WALLET);
+        timelockPolicy.cancelProposal(POLICY_ID, WALLET, callData, nonce);
+
+        (TimelockPolicy.ProposalStatus status,,) =
+            timelockPolicy.getProposal(WALLET, callData, nonce, POLICY_ID, WALLET);
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Cancelled), "Status should be Cancelled");
+    }
+
+    function test_GivenCallerIsAccountAndProposalIsPending() external whenCallingCancelProposal {
+        // it should set status to cancelled (cancelling an approved Pending proposal)
+        // it should emit ProposalCancelled
+        bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
+        uint256 nonce = 301;
+
+        // Create and approve via UserOp to get Pending status
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory userOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
 
         bytes32 expectedKey = keccak256(abi.encode(WALLET, keccak256(callData), nonce));
 
@@ -324,9 +346,9 @@ contract TimelockTest is Test {
     }
 
     function test_GivenNoopCalldataAndValidSignature() external whenCallingCheckUserOpPolicyToCreateProposal {
-        // it should create the proposal
+        // it should create+approve the proposal in one step (no prior external proposal)
         // it should return zero for state persistence
-        // it should emit ProposalCreated
+        // it should emit ProposalCreated with timing
         bytes memory proposalCallData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 proposalNonce = 700;
         bytes memory sig = _createProposalSignature(proposalCallData, proposalNonce);
@@ -352,7 +374,7 @@ contract TimelockTest is Test {
 
         (TimelockPolicy.ProposalStatus status,,) =
             timelockPolicy.getProposal(WALLET, proposalCallData, proposalNonce, POLICY_ID, WALLET);
-        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should be created");
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should be Pending (created+approved)");
     }
 
     function test_GivenNoopCalldataAndSignatureShorterThan65Bytes()
@@ -388,23 +410,23 @@ contract TimelockTest is Test {
         assertEq(result, SIG_VALIDATION_FAILED, "Should fail when signature claims more data than available");
     }
 
-    function test_GivenNoopCalldataAndProposalAlreadyExists() external whenCallingCheckUserOpPolicyToCreateProposal {
-        // it should return SIG_VALIDATION_FAILED
+    function test_GivenNoopCalldataAndProposalAlreadyPending() external whenCallingCheckUserOpPolicyToCreateProposal {
+        // it should return SIG_VALIDATION_FAILED when proposal is already Pending
         bytes memory proposalCallData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 proposalNonce = 800;
         bytes memory sig = _createProposalSignature(proposalCallData, proposalNonce);
 
         PackedUserOperation memory userOp = _createNoopUserOp(WALLET, sig);
 
-        // First creation should succeed
+        // First call: create+approve → Pending
         vm.prank(WALLET);
         timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
 
-        // Second creation should fail
+        // Second call: already Pending → should fail
         vm.prank(WALLET);
         uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
 
-        assertEq(result, SIG_VALIDATION_FAILED, "Should fail for duplicate proposal");
+        assertEq(result, SIG_VALIDATION_FAILED, "Should fail for already Pending proposal");
     }
 
     // ============ checkUserOpPolicy - Proposal Execution Tests ============
@@ -420,10 +442,16 @@ contract TimelockTest is Test {
         bytes memory proposalCallData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "action");
         uint256 proposalNonce = 900;
 
-        uint256 createTime = block.timestamp;
+        // Create inert proposal
         timelockPolicy.createProposal(POLICY_ID, WALLET, proposalCallData, proposalNonce);
 
-        // Get the actual stored proposal values
+        // Approve the proposal via no-op UserOp (starts the clock)
+        bytes memory sig = _createProposalSignature(proposalCallData, proposalNonce);
+        PackedUserOperation memory approveOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, approveOp);
+
+        // Get the actual stored proposal values (now has timing)
         (, uint256 storedValidAfter, uint256 storedValidUntil) =
             timelockPolicy.getProposal(WALLET, proposalCallData, proposalNonce, POLICY_ID, WALLET);
 
@@ -484,7 +512,11 @@ contract TimelockTest is Test {
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 nonce = 1100;
 
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
+        // Create and approve via UserOp
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory approveOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, approveOp);
 
         vm.warp(block.timestamp + DELAY + 1);
 
@@ -616,15 +648,14 @@ contract TimelockTest is Test {
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 nonce = 1200;
 
-        uint256 createTime = block.timestamp;
         timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
 
         (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 validUntil) =
             timelockPolicy.getProposal(WALLET, callData, nonce, POLICY_ID, WALLET);
 
-        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Status should be Pending");
-        assertEq(validAfter, createTime + DELAY, "validAfter should be correct");
-        assertEq(validUntil, createTime + DELAY + EXPIRATION, "validUntil should be correct");
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Proposed), "Status should be Proposed");
+        assertEq(validAfter, 0, "validAfter should be 0 (inert)");
+        assertEq(validUntil, 0, "validUntil should be 0 (inert)");
     }
 
     function test_GivenProposalDoesNotExist_WhenCallingGetProposal() external whenCallingGetProposal {
@@ -923,11 +954,15 @@ contract TimelockTest is Test {
 
     function test_WhenPackingValidationData() external {
         // it should correctly pack validAfter and validUntil
-        // Test the packing by creating a proposal and checking the returned validation data
+        // Test the packing by creating+approving a proposal and checking the returned validation data
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 nonce = 1400;
 
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
+        // Create and approve via UserOp
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory approveOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, approveOp);
 
         // Get the actual stored proposal values
         (, uint256 storedValidAfter, uint256 storedValidUntil) =
@@ -964,24 +999,20 @@ contract TimelockTest is Test {
         assertEq(result, SIG_VALIDATION_FAILED, "Attack without proposal should fail");
     }
 
-    function test_GivenAttackerTriesToExecuteImmediatelyAfterCreation() external whenTestingSecurityScenarios {
-        // it should return packed data with future validAfter
+    function test_GivenAttackerTriesToExecuteUnapprovedProposal() external whenTestingSecurityScenarios {
+        // it should return SIG_VALIDATION_FAILED because proposal is inert (Proposed, not Pending)
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "action");
         uint256 nonce = 1500;
 
-        uint256 createTime = block.timestamp;
         timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
 
-        // Try to execute immediately (before timelock)
+        // Try to execute without approval
         PackedUserOperation memory executeOp = _createUserOpWithCalldata(WALLET, callData, nonce, "");
 
         vm.prank(WALLET);
         uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, executeOp);
 
-        // Extract validAfter - it should be in the future
-        uint48 validAfter = uint48(result >> 208);
-        assertGt(validAfter, block.timestamp, "validAfter should be in the future");
-        assertEq(validAfter, uint48(createTime) + DELAY, "validAfter should be createTime + DELAY");
+        assertEq(result, SIG_VALIDATION_FAILED, "Unapproved proposal should fail execution");
     }
 
     function test_GivenAttackerTriesToReexecuteAUsedProposal() external whenTestingSecurityScenarios {
@@ -989,7 +1020,11 @@ contract TimelockTest is Test {
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "action");
         uint256 nonce = 1600;
 
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
+        // Create and approve via UserOp
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory approveOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, approveOp);
 
         vm.warp(block.timestamp + DELAY + 1);
 
@@ -1034,6 +1069,117 @@ contract TimelockTest is Test {
         assertGt(validUntil, validAfter, "validUntil should be after validAfter");
     }
 
+    // ============ Proposal Approval Tests ============
+
+    modifier whenCallingCheckUserOpPolicyToApproveProposal() {
+        _;
+    }
+
+    function test_ApproveExistingProposal() external whenCallingCheckUserOpPolicyToApproveProposal {
+        // it should transition Proposed → Pending and start the clock
+        bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "approve_test");
+        uint256 nonce = 2000;
+
+        // Create inert proposal externally
+        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
+
+        // Verify it's Proposed with no timing
+        (TimelockPolicy.ProposalStatus statusBefore, uint256 vaBefore, uint256 vuBefore) =
+            timelockPolicy.getProposal(WALLET, callData, nonce, POLICY_ID, WALLET);
+        assertEq(uint256(statusBefore), uint256(TimelockPolicy.ProposalStatus.Proposed), "Should be Proposed");
+        assertEq(vaBefore, 0, "validAfter should be 0 before approval");
+        assertEq(vuBefore, 0, "validUntil should be 0 before approval");
+
+        // Approve via no-op UserOp
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory approveOp = _createNoopUserOp(WALLET, sig);
+
+        bytes32 expectedKey = keccak256(abi.encode(WALLET, keccak256(callData), nonce));
+        uint48 expectedValidAfter = uint48(block.timestamp) + DELAY;
+        uint48 expectedValidUntil = expectedValidAfter + EXPIRATION;
+
+        vm.expectEmit(true, true, true, true);
+        emit TimelockPolicy.ProposalApproved(WALLET, POLICY_ID, expectedKey, expectedValidAfter, expectedValidUntil);
+
+        vm.prank(WALLET);
+        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, approveOp);
+
+        assertEq(result, 0, "Approval should return 0 for state persistence");
+
+        // Verify it's now Pending with timing set
+        (TimelockPolicy.ProposalStatus statusAfter, uint256 vaAfter, uint256 vuAfter) =
+            timelockPolicy.getProposal(WALLET, callData, nonce, POLICY_ID, WALLET);
+        assertEq(uint256(statusAfter), uint256(TimelockPolicy.ProposalStatus.Pending), "Should be Pending after approval");
+        assertEq(vaAfter, expectedValidAfter, "validAfter should be set");
+        assertEq(vuAfter, expectedValidUntil, "validUntil should be set");
+    }
+
+    function test_CannotApproveAlreadyPendingProposal() external whenCallingCheckUserOpPolicyToApproveProposal {
+        // it should return SIG_VALIDATION_FAILED
+        bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
+        uint256 nonce = 2100;
+
+        // Create and approve in one step
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory approveOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, approveOp);
+
+        // Try to approve again
+        vm.prank(WALLET);
+        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, approveOp);
+
+        assertEq(result, SIG_VALIDATION_FAILED, "Should fail for already Pending proposal");
+    }
+
+    function test_CannotApproveCancelledProposal() external whenCallingCheckUserOpPolicyToApproveProposal {
+        // it should return SIG_VALIDATION_FAILED
+        bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
+        uint256 nonce = 2200;
+
+        // Create and cancel
+        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
+        vm.prank(WALLET);
+        timelockPolicy.cancelProposal(POLICY_ID, WALLET, callData, nonce);
+
+        // Try to approve
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory approveOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, approveOp);
+
+        assertEq(result, SIG_VALIDATION_FAILED, "Should fail for cancelled proposal");
+    }
+
+    function test_SpamProposalsAreInert() external whenTestingSecurityScenarios {
+        // it should demonstrate that spam proposals cannot be executed without approval
+        bytes memory callData1 = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "approve_usdc");
+        bytes memory callData2 = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "approve_weth");
+        bytes memory callData3 = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "transfer_all");
+
+        // Attacker creates many proposals
+        vm.startPrank(ATTACKER);
+        timelockPolicy.createProposal(POLICY_ID, WALLET, callData1, 0);
+        timelockPolicy.createProposal(POLICY_ID, WALLET, callData2, 0);
+        timelockPolicy.createProposal(POLICY_ID, WALLET, callData3, 0);
+        vm.stopPrank();
+
+        // Wait past timelock
+        vm.warp(block.timestamp + DELAY + 1);
+
+        // None can be executed because they're all in Proposed (inert) status
+        PackedUserOperation memory op1 = _createUserOpWithCalldata(WALLET, callData1, 0, "");
+        PackedUserOperation memory op2 = _createUserOpWithCalldata(WALLET, callData2, 0, "");
+        PackedUserOperation memory op3 = _createUserOpWithCalldata(WALLET, callData3, 0, "");
+
+        vm.prank(WALLET);
+        assertEq(timelockPolicy.checkUserOpPolicy(POLICY_ID, op1), SIG_VALIDATION_FAILED, "Spam proposal 1 should fail");
+        vm.prank(WALLET);
+        assertEq(timelockPolicy.checkUserOpPolicy(POLICY_ID, op2), SIG_VALIDATION_FAILED, "Spam proposal 2 should fail");
+        vm.prank(WALLET);
+        assertEq(timelockPolicy.checkUserOpPolicy(POLICY_ID, op3), SIG_VALIDATION_FAILED, "Spam proposal 3 should fail");
+    }
+
     function test_GivenAttackerTriesToCancelAnotherAccountsProposal() external whenTestingSecurityScenarios {
         // it should revert with OnlyAccount
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
@@ -1045,9 +1191,9 @@ contract TimelockTest is Test {
         vm.expectRevert(TimelockPolicy.OnlyAccount.selector);
         timelockPolicy.cancelProposal(POLICY_ID, WALLET, callData, nonce);
 
-        // Verify proposal is still pending
+        // Verify proposal is still Proposed (inert)
         (TimelockPolicy.ProposalStatus status,,) =
             timelockPolicy.getProposal(WALLET, callData, nonce, POLICY_ID, WALLET);
-        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should still be pending");
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Proposed), "Proposal should still be Proposed");
     }
 }
