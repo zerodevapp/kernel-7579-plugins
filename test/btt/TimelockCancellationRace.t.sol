@@ -40,10 +40,22 @@ contract TimelockCancellationRaceTest is Test {
         vm.stopPrank();
     }
 
-    // Helper function to create a proposal
+    // Helper function to create a proposal via no-op UserOp
     function _createProposal(bytes memory callData, uint256 nonce) internal {
+        bytes memory sig = abi.encodePacked(bytes32(callData.length), callData, bytes32(nonce), bytes1(0x00));
+        PackedUserOperation memory noopOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
         vm.prank(WALLET);
-        timelockPolicy.createProposal(policyId, WALLET, callData, nonce);
+        timelockPolicy.checkUserOpPolicy(policyId, noopOp);
     }
 
     // Helper function to cancel a proposal
@@ -220,14 +232,23 @@ contract TimelockCancellationRaceTest is Test {
         _createProposal(TEST_CALLDATA, TEST_NONCE);
         _cancelProposal(TEST_CALLDATA, TEST_NONCE);
 
-        // Note: The current implementation does not allow creating a new proposal
-        // for the same calldata/nonce because cancelled proposals persist
-        // This test verifies this behavior
-
-        // Action & Verify: Attempting to create a new proposal with same params should fail
+        // Note: Cancelled proposals persist. Attempting to create via no-op UserOp
+        // for the same calldata/nonce returns SIG_VALIDATION_FAILED.
+        bytes memory sig = abi.encodePacked(bytes32(TEST_CALLDATA.length), TEST_CALLDATA, bytes32(TEST_NONCE), bytes1(0x00));
+        PackedUserOperation memory retryOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
         vm.prank(WALLET);
-        vm.expectRevert(TimelockPolicy.ProposalAlreadyExists.selector);
-        timelockPolicy.createProposal(policyId, WALLET, TEST_CALLDATA, TEST_NONCE);
+        uint256 retryResult = timelockPolicy.checkUserOpPolicy(policyId, retryOp);
+        assertEq(retryResult, 1, "Should return SIG_VALIDATION_FAILED for cancelled proposal");
 
         // However, a proposal with different nonce should work
         uint256 newNonce = TEST_NONCE + 1;
@@ -434,10 +455,23 @@ contract TimelockCancellationRaceTest is Test {
         // Fast forward past when grace period would have ended
         vm.warp(block.timestamp + DELAY + GRACE_PERIOD + EXPIRATION_PERIOD + 1);
 
-        // Action & Verify: it should revert with ProposalAlreadyExists because cancelled proposals persist
+        // Action & Verify: Attempting to create via no-op UserOp returns SIG_VALIDATION_FAILED
+        // because cancelled proposals persist in storage
+        bytes memory sig = abi.encodePacked(bytes32(TEST_CALLDATA.length), TEST_CALLDATA, bytes32(TEST_NONCE), bytes1(0x00));
+        PackedUserOperation memory noopOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
         vm.prank(WALLET);
-        vm.expectRevert(TimelockPolicy.ProposalAlreadyExists.selector);
-        timelockPolicy.createProposal(policyId, WALLET, TEST_CALLDATA, TEST_NONCE);
+        uint256 result = timelockPolicy.checkUserOpPolicy(policyId, noopOp);
+        assertEq(result, 1, "Should return SIG_VALIDATION_FAILED because cancelled proposals persist");
     }
 
     function test_GivenTheOriginalProposalWasExecuted() external whenCreatingANewProposalAfterGracePeriod {
@@ -455,10 +489,23 @@ contract TimelockCancellationRaceTest is Test {
         // Fast forward more
         vm.warp(block.timestamp + EXPIRATION_PERIOD + 1);
 
-        // Action & Verify: it should revert with ProposalAlreadyExists because executed proposals persist
+        // Action & Verify: Attempting to create via no-op UserOp returns SIG_VALIDATION_FAILED
+        // because executed proposals persist in storage
+        bytes memory sig = abi.encodePacked(bytes32(TEST_CALLDATA.length), TEST_CALLDATA, bytes32(TEST_NONCE), bytes1(0x00));
+        PackedUserOperation memory noopOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
         vm.prank(WALLET);
-        vm.expectRevert(TimelockPolicy.ProposalAlreadyExists.selector);
-        timelockPolicy.createProposal(policyId, WALLET, TEST_CALLDATA, TEST_NONCE);
+        uint256 result = timelockPolicy.checkUserOpPolicy(policyId, noopOp);
+        assertEq(result, 1, "Should return SIG_VALIDATION_FAILED because executed proposals persist");
     }
 
     // ==================== whenValidatingGracePeriodTiming ====================
@@ -545,9 +592,21 @@ contract TimelockCancellationRaceTest is Test {
     function test_NonInitializedAccountCannotCreateProposal() external {
         address nonInitializedAccount = address(0xDEAD);
 
-        // Try to create proposal on non-initialized account
+        // Try to create proposal via no-op UserOp on non-initialized account
+        bytes memory sig = abi.encodePacked(bytes32(TEST_CALLDATA.length), TEST_CALLDATA, bytes32(TEST_NONCE), bytes1(0x00));
+        PackedUserOperation memory noopOp = PackedUserOperation({
+            sender: nonInitializedAccount,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
         vm.prank(nonInitializedAccount);
-        vm.expectRevert(abi.encodeWithSelector(IModule.NotInitialized.selector, nonInitializedAccount));
-        timelockPolicy.createProposal(policyId, nonInitializedAccount, TEST_CALLDATA, TEST_NONCE);
+        uint256 result = timelockPolicy.checkUserOpPolicy(policyId, noopOp);
+        assertEq(result, 1, "Should return SIG_VALIDATION_FAILED for non-initialized account");
     }
 }

@@ -193,58 +193,6 @@ contract TimelockTest is Test {
         assertFalse(timelockPolicy.isModuleType(999), "Should not support invalid type");
     }
 
-    // ============ createProposal Tests ============
-
-    modifier whenCallingCreateProposal() {
-        _;
-    }
-
-    function test_GivenConfigIsInitializedAndProposalDoesNotExist() external whenCallingCreateProposal {
-        // it should store the proposal with pending status
-        // it should set correct validAfter and validUntil
-        // it should emit ProposalCreated
-        bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
-        uint256 nonce = 100;
-
-        uint256 createTime = block.timestamp;
-        bytes32 expectedKey = keccak256(abi.encode(WALLET, keccak256(callData), nonce));
-
-        vm.expectEmit(true, true, true, true);
-        emit TimelockPolicy.ProposalCreated(
-            WALLET, POLICY_ID, expectedKey, uint48(createTime) + DELAY, uint48(createTime) + DELAY + GRACE_PERIOD + EXPIRATION
-        );
-
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
-
-        (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 graceEnd, uint256 validUntil) =
-            timelockPolicy.getProposal(WALLET, callData, nonce, POLICY_ID, WALLET);
-
-        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Status should be Pending");
-        assertEq(validAfter, createTime + DELAY, "validAfter should be timestamp + delay");
-        assertEq(graceEnd, createTime + DELAY + GRACE_PERIOD, "graceEnd should be validAfter + gracePeriod");
-        assertEq(validUntil, createTime + DELAY + GRACE_PERIOD + EXPIRATION, "validUntil should be graceEnd + expiration");
-    }
-
-    function test_GivenNotInitialized_WhenCallingCreateProposal() external whenCallingCreateProposal {
-        // it should revert with NotInitialized
-        address uninitWallet = address(0x9999);
-        bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
-
-        vm.expectRevert(abi.encodeWithSelector(IModule.NotInitialized.selector, uninitWallet));
-        timelockPolicy.createProposal(POLICY_ID, uninitWallet, callData, 0);
-    }
-
-    function test_GivenProposalAlreadyExists() external whenCallingCreateProposal {
-        // it should revert with ProposalAlreadyExists
-        bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
-        uint256 nonce = 200;
-
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
-
-        vm.expectRevert(TimelockPolicy.ProposalAlreadyExists.selector);
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
-    }
-
     // ============ cancelProposal Tests ============
 
     modifier whenCallingCancelProposal() {
@@ -252,12 +200,16 @@ contract TimelockTest is Test {
     }
 
     function test_GivenCallerIsAccountAndProposalIsPending() external whenCallingCancelProposal {
-        // it should set status to cancelled
+        // it should set status to cancelled (cancelling a Pending proposal)
         // it should emit ProposalCancelled
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
-        uint256 nonce = 300;
+        uint256 nonce = 301;
 
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
+        // Create proposal via no-op UserOp to get Pending status
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory userOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
 
         bytes32 expectedKey = keccak256(abi.encode(WALLET, keccak256(callData), nonce));
 
@@ -277,7 +229,11 @@ contract TimelockTest is Test {
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 nonce = 400;
 
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
+        // Create proposal via no-op UserOp
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory noopOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, noopOp);
 
         vm.prank(ATTACKER);
         vm.expectRevert(TimelockPolicy.OnlyAccount.selector);
@@ -309,7 +265,11 @@ contract TimelockTest is Test {
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 nonce = 600;
 
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
+        // Create proposal via no-op UserOp
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory noopOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, noopOp);
 
         vm.prank(WALLET);
         timelockPolicy.cancelProposal(POLICY_ID, WALLET, callData, nonce);
@@ -326,9 +286,9 @@ contract TimelockTest is Test {
     }
 
     function test_GivenNoopCalldataAndValidSignature() external whenCallingCheckUserOpPolicyToCreateProposal {
-        // it should create the proposal
+        // it should create the proposal as Pending with clock started
         // it should return zero for state persistence
-        // it should emit ProposalCreated
+        // it should emit ProposalCreated with timing
         bytes memory proposalCallData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 proposalNonce = 700;
         bytes memory sig = _createProposalSignature(proposalCallData, proposalNonce);
@@ -354,7 +314,7 @@ contract TimelockTest is Test {
 
         (TimelockPolicy.ProposalStatus status,,,) =
             timelockPolicy.getProposal(WALLET, proposalCallData, proposalNonce, POLICY_ID, WALLET);
-        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should be created");
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should be Pending");
     }
 
     function test_GivenNoopCalldataAndSignatureShorterThan65Bytes()
@@ -390,23 +350,23 @@ contract TimelockTest is Test {
         assertEq(result, SIG_VALIDATION_FAILED, "Should fail when signature claims more data than available");
     }
 
-    function test_GivenNoopCalldataAndProposalAlreadyExists() external whenCallingCheckUserOpPolicyToCreateProposal {
-        // it should return SIG_VALIDATION_FAILED
+    function test_GivenNoopCalldataAndProposalAlreadyPending() external whenCallingCheckUserOpPolicyToCreateProposal {
+        // it should return SIG_VALIDATION_FAILED when proposal is already Pending
         bytes memory proposalCallData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 proposalNonce = 800;
         bytes memory sig = _createProposalSignature(proposalCallData, proposalNonce);
 
         PackedUserOperation memory userOp = _createNoopUserOp(WALLET, sig);
 
-        // First creation should succeed
+        // First call: create -> Pending
         vm.prank(WALLET);
         timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
 
-        // Second creation should fail
+        // Second call: already Pending -> should fail
         vm.prank(WALLET);
         uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
 
-        assertEq(result, SIG_VALIDATION_FAILED, "Should fail for duplicate proposal");
+        assertEq(result, SIG_VALIDATION_FAILED, "Should fail for already Pending proposal");
     }
 
     // ============ checkUserOpPolicy - Proposal Execution Tests ============
@@ -422,8 +382,11 @@ contract TimelockTest is Test {
         bytes memory proposalCallData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "action");
         uint256 proposalNonce = 900;
 
-        uint256 createTime = block.timestamp;
-        timelockPolicy.createProposal(POLICY_ID, WALLET, proposalCallData, proposalNonce);
+        // Create proposal via no-op UserOp (creates Pending directly)
+        bytes memory sig = _createProposalSignature(proposalCallData, proposalNonce);
+        PackedUserOperation memory noopOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, noopOp);
 
         // Get the actual stored proposal values
         (, uint256 storedValidAfter, uint256 storedGraceEnd, uint256 storedValidUntil) =
@@ -469,7 +432,11 @@ contract TimelockTest is Test {
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 nonce = 1000;
 
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
+        // Create proposal via no-op UserOp
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory noopOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, noopOp);
 
         vm.prank(WALLET);
         timelockPolicy.cancelProposal(POLICY_ID, WALLET, callData, nonce);
@@ -487,7 +454,11 @@ contract TimelockTest is Test {
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 nonce = 1100;
 
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
+        // Create proposal via no-op UserOp
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory noopOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, noopOp);
 
         vm.warp(block.timestamp + DELAY + 1);
 
@@ -619,16 +590,19 @@ contract TimelockTest is Test {
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 nonce = 1200;
 
-        uint256 createTime = block.timestamp;
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
+        // Create proposal via no-op UserOp (creates Pending with timing)
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory noopOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, noopOp);
 
         (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 graceEnd, uint256 validUntil) =
             timelockPolicy.getProposal(WALLET, callData, nonce, POLICY_ID, WALLET);
 
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Status should be Pending");
-        assertEq(validAfter, createTime + DELAY, "validAfter should be correct");
-        assertEq(graceEnd, createTime + DELAY + GRACE_PERIOD, "graceEnd should be correct");
-        assertEq(validUntil, createTime + DELAY + GRACE_PERIOD + EXPIRATION, "validUntil should be correct");
+        assertEq(validAfter, block.timestamp + DELAY, "validAfter should be correct");
+        assertEq(graceEnd, block.timestamp + DELAY + GRACE_PERIOD, "graceEnd should be correct");
+        assertEq(validUntil, block.timestamp + DELAY + GRACE_PERIOD + EXPIRATION, "validUntil should be correct");
     }
 
     function test_GivenProposalDoesNotExist_WhenCallingGetProposal() external whenCallingGetProposal {
@@ -663,6 +637,7 @@ contract TimelockTest is Test {
         _;
     }
 
+    // Case 1: Empty calldata
     function test_GivenCalldataIsEmpty() external whenDetectingNoopCalldata {
         // it should be detected as noop
         bytes memory sig = _createProposalSignature("test", 0);
@@ -675,253 +650,112 @@ contract TimelockTest is Test {
         assertEq(result, 0, "Empty calldata should be detected as noop");
     }
 
-    function test_GivenCalldataIsShorterThan4Bytes() external whenDetectingNoopCalldata {
+    // Case 2: ERC-7579 execute(mode=0x00, "") — single-call with empty execution data
+    function test_GivenCalldataIsERC7579ExecuteNoop() external whenDetectingNoopCalldata {
+        // it should be detected as noop
+        bytes memory noopExecute = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "");
+        bytes memory sig = _createProposalSignature("test", 1);
+        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, noopExecute, 0, sig);
+
+        vm.prank(WALLET);
+        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
+
+        assertEq(result, 0, "ERC-7579 execute noop should be detected as noop");
+    }
+
+    // Case 3: executeUserOp + empty inner calldata (just the 4-byte selector)
+    function test_GivenCalldataIsExecuteUserOpEmpty() external whenDetectingNoopCalldata {
+        // it should be detected as noop
+        bytes memory executeUserOpNoop = abi.encodePacked(IAccountExecute.executeUserOp.selector);
+        bytes memory sig = _createProposalSignature("test", 2);
+        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, executeUserOpNoop, 0, sig);
+
+        vm.prank(WALLET);
+        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
+
+        assertEq(result, 0, "executeUserOp + empty should be detected as noop");
+    }
+
+    // Case 4: executeUserOp + ERC-7579 execute no-op
+    function test_GivenCalldataIsExecuteUserOpWithERC7579Noop() external whenDetectingNoopCalldata {
+        // it should be detected as noop
+        bytes memory noopExecute = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "");
+        bytes memory executeUserOpWrapped = abi.encodePacked(IAccountExecute.executeUserOp.selector, noopExecute);
+        bytes memory sig = _createProposalSignature("test", 3);
+        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, executeUserOpWrapped, 0, sig);
+
+        vm.prank(WALLET);
+        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
+
+        assertEq(result, 0, "executeUserOp + ERC-7579 execute noop should be detected as noop");
+    }
+
+    // Negative: non-empty arbitrary calldata
+    function test_GivenCalldataIsNonEmpty() external whenDetectingNoopCalldata {
         // it should not be detected as noop
-        bytes memory shortCalldata = hex"aabb";
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, shortCalldata, 0, "");
+        bytes memory nonEmptyCalldata = hex"aabb";
+        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, nonEmptyCalldata, 0, "");
 
         vm.prank(WALLET);
         uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
 
         // Not a no-op, goes to execution path, no proposal exists
-        assertEq(result, SIG_VALIDATION_FAILED, "Short calldata should not be noop");
+        assertEq(result, SIG_VALIDATION_FAILED, "Non-empty calldata should not be noop");
     }
 
-    function test_GivenSelectorIsUnrecognized() external whenDetectingNoopCalldata {
+    // Negative: ERC-7579 execute with delegatecall mode
+    function test_GivenCalldataIsERC7579ExecuteDelegatecall() external whenDetectingNoopCalldata {
+        // it should not be detected as noop — mode 0xFE is delegatecall
+        bytes32 delegatecallMode = bytes32(uint256(0xFE) << 248);
+        bytes memory delegatecallExecute =
+            abi.encodeWithSelector(IERC7579Execution.execute.selector, delegatecallMode, "");
+        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, delegatecallExecute, 0, "");
+
+        vm.prank(WALLET);
+        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
+
+        assertEq(result, SIG_VALIDATION_FAILED, "Delegatecall mode should not be noop");
+    }
+
+    // Negative: ERC-7579 execute with batch mode
+    function test_GivenCalldataIsERC7579ExecuteBatch() external whenDetectingNoopCalldata {
+        // it should not be detected as noop — mode 0x01 is batch
+        bytes32 batchMode = bytes32(uint256(0x01) << 248);
+        bytes memory batchExecute = abi.encodeWithSelector(IERC7579Execution.execute.selector, batchMode, "");
+        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, batchExecute, 0, "");
+
+        vm.prank(WALLET);
+        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
+
+        assertEq(result, SIG_VALIDATION_FAILED, "Batch mode should not be noop");
+    }
+
+    // Negative: ERC-7579 execute with non-empty execution data
+    function test_GivenCalldataIsERC7579ExecuteWithData() external whenDetectingNoopCalldata {
+        // it should not be detected as noop — has execution data
+        bytes memory executeWithData =
+            abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "some_execution_data");
+        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, executeWithData, 0, "");
+
+        vm.prank(WALLET);
+        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
+
+        assertEq(result, SIG_VALIDATION_FAILED, "Execute with data should not be noop");
+    }
+
+    // Negative: executeUserOp wrapping a delegatecall ERC-7579 execute
+    function test_GivenCalldataIsExecuteUserOpWithDelegatecall() external whenDetectingNoopCalldata {
         // it should not be detected as noop
-        bytes memory unknownCalldata = abi.encodeWithSelector(bytes4(0xdeadbeef), "test");
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, unknownCalldata, 0, "");
+        bytes32 delegatecallMode = bytes32(uint256(0xFE) << 248);
+        bytes memory delegatecallExecute =
+            abi.encodeWithSelector(IERC7579Execution.execute.selector, delegatecallMode, "");
+        bytes memory wrapped = abi.encodePacked(IAccountExecute.executeUserOp.selector, delegatecallExecute);
+        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, wrapped, 0, "");
 
         vm.prank(WALLET);
         uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
 
-        assertEq(result, SIG_VALIDATION_FAILED, "Unknown selector should not be noop");
-    }
-
-    // ============ _isNoOpERC7579Execute Tests ============
-
-    modifier whenDetectingERC7579ExecuteNoop() {
-        _;
-    }
-
-    function test_GivenTargetIsSelfAndValueIsZeroAndInnerCalldataIsEmpty() external whenDetectingERC7579ExecuteNoop {
-        // it should be detected as noop
-        // ERC-7579 compact format: abi.encodePacked(target, value) = 52 bytes
-        bytes memory executionCalldata = abi.encodePacked(bytes20(WALLET), uint256(0));
-
-        bytes memory callData =
-            abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), executionCalldata);
-
-        bytes memory sig = _createProposalSignature("proposal", 0);
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, sig);
-
-        vm.prank(WALLET);
-        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
-
-        assertEq(result, 0, "ERC7579 execute to self with zero value should be noop");
-    }
-
-    function test_GivenTargetIsZeroAddressAndValueIsZeroAndInnerCalldataIsEmpty()
-        external
-        whenDetectingERC7579ExecuteNoop
-    {
-        // it should be detected as noop
-        // ERC-7579 compact format: abi.encodePacked(target, value) = 52 bytes
-        bytes memory executionCalldata = abi.encodePacked(bytes20(address(0)), uint256(0));
-
-        bytes memory callData =
-            abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), executionCalldata);
-
-        bytes memory sig = _createProposalSignature("proposal", 1);
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, sig);
-
-        vm.prank(WALLET);
-        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
-
-        assertEq(result, 0, "ERC7579 execute to zero address with zero value should be noop");
-    }
-
-    function test_GivenCalldataIsShorterThan68Bytes() external whenDetectingERC7579ExecuteNoop {
-        // it should not be detected as noop
-        bytes memory shortCallData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0));
-
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, shortCallData, 0, "");
-
-        vm.prank(WALLET);
-        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
-
-        assertEq(result, SIG_VALIDATION_FAILED, "Too short for offset should not be noop");
-    }
-
-    function test_GivenOffsetIsNot64() external whenDetectingERC7579ExecuteNoop {
-        // it should not be detected as noop
-        bytes memory callData = abi.encodePacked(
-            IERC7579Execution.execute.selector,
-            bytes32(0), // mode
-            bytes32(uint256(32)), // wrong offset (should be 64)
-            bytes32(uint256(52)), // length
-            bytes20(WALLET),
-            uint256(0)
-        );
-
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, "");
-
-        vm.prank(WALLET);
-        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
-
-        assertEq(result, SIG_VALIDATION_FAILED, "Wrong offset should not be noop");
-    }
-
-    function test_GivenCalldataIsShorterThan100Bytes() external whenDetectingERC7579ExecuteNoop {
-        // it should not be detected as noop
-        bytes memory callData = abi.encodePacked(
-            IERC7579Execution.execute.selector,
-            bytes32(0), // mode
-            bytes32(uint256(64)) // offset
-            // missing length and data
-        );
-
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, "");
-
-        vm.prank(WALLET);
-        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
-
-        assertEq(result, SIG_VALIDATION_FAILED, "Too short for length should not be noop");
-    }
-
-    function test_GivenExecDataLengthIsNot52() external whenDetectingERC7579ExecuteNoop {
-        // it should not be detected as noop (length 20 != 52)
-        bytes memory callData = abi.encodePacked(
-            IERC7579Execution.execute.selector,
-            bytes32(0), // mode
-            bytes32(uint256(64)), // offset
-            bytes32(uint256(20)) // length only 20 (must be exactly 52)
-        );
-
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, "");
-
-        vm.prank(WALLET);
-        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
-
-        assertEq(result, SIG_VALIDATION_FAILED, "Exec data length != 52 should not be noop");
-    }
-
-    function test_GivenTargetIsNotSelfOrZero() external whenDetectingERC7579ExecuteNoop {
-        // it should not be detected as noop
-        bytes memory executionCalldata = abi.encodePacked(bytes20(ATTACKER), uint256(0));
-
-        bytes memory callData =
-            abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), executionCalldata);
-
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, "");
-
-        vm.prank(WALLET);
-        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
-
-        assertEq(result, SIG_VALIDATION_FAILED, "Wrong target should not be noop");
-    }
-
-    function test_GivenValueIsNonzero() external whenDetectingERC7579ExecuteNoop {
-        // it should not be detected as noop
-        bytes memory executionCalldata = abi.encodePacked(bytes20(WALLET), uint256(1 ether));
-
-        bytes memory callData =
-            abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), executionCalldata);
-
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, "");
-
-        vm.prank(WALLET);
-        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
-
-        assertEq(result, SIG_VALIDATION_FAILED, "Non-zero value should not be noop");
-    }
-
-    function test_GivenExecDataLengthGreaterThan52() external whenDetectingERC7579ExecuteNoop {
-        // it should not be detected as noop (has inner calldata)
-        bytes memory executionCalldata = abi.encodePacked(bytes20(WALLET), uint256(0), hex"deadbeef");
-
-        bytes memory callData =
-            abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), executionCalldata);
-
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, "");
-
-        vm.prank(WALLET);
-        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
-
-        assertEq(result, SIG_VALIDATION_FAILED, "Non-empty inner calldata should not be noop");
-    }
-
-    // ============ _isNoOpExecuteUserOp Tests ============
-
-    modifier whenDetectingExecuteUserOpNoop() {
-        _;
-    }
-
-    function test_GivenUserOpDataIsEmpty() external whenDetectingExecuteUserOpNoop {
-        // it should be detected as noop
-        bytes memory callData = abi.encodePacked(
-            IAccountExecute.executeUserOp.selector,
-            bytes32(uint256(32)), // offset to userOp
-            bytes32(0), // userOpHash
-            bytes32(uint256(0)) // userOp length = 0
-        );
-
-        bytes memory sig = _createProposalSignature("proposal", 2);
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, sig);
-
-        vm.prank(WALLET);
-        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
-
-        assertEq(result, 0, "executeUserOp with empty userOp should be noop");
-    }
-
-    function test_GivenCalldataIsShorterThan100Bytes_WhenDetectingExecuteUserOpNoop()
-        external
-        whenDetectingExecuteUserOpNoop
-    {
-        // it should not be detected as noop
-        bytes memory callData = abi.encodePacked(IAccountExecute.executeUserOp.selector, bytes32(uint256(32)));
-
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, "");
-
-        vm.prank(WALLET);
-        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
-
-        assertEq(result, SIG_VALIDATION_FAILED, "Too short executeUserOp should not be noop");
-    }
-
-    function test_GivenOffsetIsNot32_WhenDetectingExecuteUserOpNoop() external whenDetectingExecuteUserOpNoop {
-        // it should not be detected as noop
-        bytes memory callData = abi.encodePacked(
-            IAccountExecute.executeUserOp.selector,
-            bytes32(uint256(64)), // wrong offset
-            bytes32(0),
-            bytes32(uint256(0))
-        );
-
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, "");
-
-        vm.prank(WALLET);
-        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
-
-        assertEq(result, SIG_VALIDATION_FAILED, "Wrong offset in executeUserOp should not be noop");
-    }
-
-    function test_GivenUserOpLengthIsNonzero() external whenDetectingExecuteUserOpNoop {
-        // it should not be detected as noop
-        bytes memory callData = abi.encodePacked(
-            IAccountExecute.executeUserOp.selector,
-            bytes32(uint256(32)),
-            bytes32(0),
-            bytes32(uint256(10)) // non-empty userOp
-        );
-
-        PackedUserOperation memory userOp = _createUserOpWithCalldata(WALLET, callData, 0, "");
-
-        vm.prank(WALLET);
-        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, userOp);
-
-        assertEq(result, SIG_VALIDATION_FAILED, "Non-empty userOp should not be noop");
+        assertEq(result, SIG_VALIDATION_FAILED, "executeUserOp + delegatecall should not be noop");
     }
 
     // ============ _packValidationData Tests ============
@@ -932,7 +766,11 @@ contract TimelockTest is Test {
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 nonce = 1400;
 
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
+        // Create proposal via no-op UserOp
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory noopOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, noopOp);
 
         // Get the actual stored proposal values
         (, uint256 storedValidAfter, uint256 storedGraceEnd, uint256 storedValidUntil) =
@@ -969,32 +807,16 @@ contract TimelockTest is Test {
         assertEq(result, SIG_VALIDATION_FAILED, "Attack without proposal should fail");
     }
 
-    function test_GivenAttackerTriesToExecuteImmediatelyAfterCreation() external whenTestingSecurityScenarios {
-        // it should return packed data with future validAfter
-        bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "action");
-        uint256 nonce = 1500;
-
-        uint256 createTime = block.timestamp;
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
-
-        // Try to execute immediately (before timelock)
-        PackedUserOperation memory executeOp = _createUserOpWithCalldata(WALLET, callData, nonce, "");
-
-        vm.prank(WALLET);
-        uint256 result = timelockPolicy.checkUserOpPolicy(POLICY_ID, executeOp);
-
-        // Extract validAfter from packed data - it's actually graceEnd, should be in the future
-        uint48 validAfter = uint48(result >> 208);
-        assertGt(validAfter, block.timestamp, "validAfter should be in the future");
-        assertEq(validAfter, uint48(createTime) + DELAY + GRACE_PERIOD, "validAfter should be createTime + DELAY + GRACE_PERIOD (graceEnd)");
-    }
-
     function test_GivenAttackerTriesToReexecuteAUsedProposal() external whenTestingSecurityScenarios {
         // it should return SIG_VALIDATION_FAILED
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "action");
         uint256 nonce = 1600;
 
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
+        // Create proposal via no-op UserOp
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory noopOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, noopOp);
 
         vm.warp(block.timestamp + DELAY + 1);
 
@@ -1044,7 +866,11 @@ contract TimelockTest is Test {
         bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "test");
         uint256 nonce = 1800;
 
-        timelockPolicy.createProposal(POLICY_ID, WALLET, callData, nonce);
+        // Create proposal via no-op UserOp from WALLET
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory noopOp = _createNoopUserOp(WALLET, sig);
+        vm.prank(WALLET);
+        timelockPolicy.checkUserOpPolicy(POLICY_ID, noopOp);
 
         vm.prank(ATTACKER);
         vm.expectRevert(TimelockPolicy.OnlyAccount.selector);
@@ -1053,6 +879,6 @@ contract TimelockTest is Test {
         // Verify proposal is still pending
         (TimelockPolicy.ProposalStatus status,,,) =
             timelockPolicy.getProposal(WALLET, callData, nonce, POLICY_ID, WALLET);
-        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should still be pending");
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should still be Pending");
     }
 }
