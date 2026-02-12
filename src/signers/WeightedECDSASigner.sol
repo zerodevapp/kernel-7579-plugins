@@ -35,6 +35,8 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
     bytes32 private constant PROPOSAL_TYPEHASH =
         keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce)");
 
+    error ZeroWeightSigner();
+
     mapping(bytes32 id => mapping(address kernel => WeightedECDSASignerStorage)) public weightedStorage;
     mapping(address guardian => mapping(bytes32 id => mapping(address kernel => GuardianStorage))) public guardian;
 
@@ -46,9 +48,15 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
     }
 
     function _signerOninstall(bytes32 id, bytes calldata _data) internal override {
+        // Prevent reinstall without uninstall (would orphan old guardians and corrupt totalWeight)
+        if (_isInitialized(id, msg.sender)) revert AlreadyInitialized(msg.sender);
+
         (address[] memory _guardians, uint24[] memory _weights, uint24 _threshold) =
             abi.decode(_data, (address[], uint24[], uint24));
         require(_guardians.length == _weights.length, "Length mismatch");
+        require(_guardians.length > 0, "No guardians");
+        require(_threshold > 0, "Zero threshold");
+
         weightedStorage[id][msg.sender].firstGuardian = msg.sender;
         for (uint256 i = 0; i < _guardians.length; i++) {
             require(_guardians[i] != msg.sender, "Guardian cannot be self");
@@ -161,40 +169,65 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         }
 
         uint256 sigCount = sig.length / 65;
-        require(sigCount > 0, "No sig");
+        if (sigCount == 0) {
+            return SIG_VALIDATION_FAILED_UINT;
+        }
 
         uint256 totalWeight = 0;
         uint256 threshold = strg.threshold;
         address signer;
         address lastSigner = address(0);
 
+        // Track proposalHash signers to prevent double-counting with userOpHash signer
+        address[] memory proposalSigners = new address[](sigCount - 1);
+
         // Process all signatures except the last one (they sign proposalHash)
         // Signers must be in strictly ascending order to prevent reuse
+        // NOTE: No early return - must always verify userOpHash signature
         for (uint256 i = 0; i < sigCount - 1; i++) {
             signer = ECDSA.tryRecoverCalldata(proposalHash, sig[i * 65:(i + 1) * 65]);
 
             // Enforce sorted order to prevent signature reuse
             require(signer > lastSigner, "Signers not sorted");
             lastSigner = signer;
+            proposalSigners[i] = signer;
 
             uint24 guardianWeight = guardian[signer][id][account].weight;
-            if (guardianWeight > 0) {
-                totalWeight += guardianWeight;
-                if (totalWeight >= threshold) {
-                    return SIG_VALIDATION_SUCCESS_UINT;
-                }
+            // Revert if non-last signer has zero weight (prevents gas griefing)
+            if (guardianWeight == 0) {
+                revert ZeroWeightSigner();
+            }
+            totalWeight += guardianWeight;
+            // No early return here - must verify userOpHash signature
+        }
+
+        // Last signature MUST verify userOpHash to bind the full userOp
+        // This prevents malleability of gas fields and other userOp parameters
+        // NOTE: use this with ep > 0.7 only, for ep <= 0.7, need to use toEthSignedMessageHash
+        signer = ECDSA.tryRecoverCalldata(userOpHash, sig[sig.length - 65:]);
+
+        uint24 lastWeight = guardian[signer][id][account].weight;
+        // If last signer has zero weight, return validation failed (don't revert)
+        if (lastWeight == 0) {
+            return SIG_VALIDATION_FAILED_UINT;
+        }
+
+        // Check if userOpHash signer already signed proposalHash (prevent double-counting)
+        bool alreadySigned = false;
+        for (uint256 i = 0; i < proposalSigners.length; i++) {
+            if (proposalSigners[i] == signer) {
+                alreadySigned = true;
+                break;
             }
         }
 
-        // Last signature verifies userOpHash (exempt from ordering requirement)
-        // NOTE: use this with ep > 0.7 only, for ep <= 0.7, need to use toEthSignedMessageHash
-        signer = ECDSA.tryRecoverCalldata(userOpHash, sig[sig.length - 65:]);
-        uint24 lastWeight = guardian[signer][id][account].weight;
-        if (lastWeight > 0) {
+        // Only add weight if signer hasn't already contributed via proposalHash
+        if (!alreadySigned) {
             totalWeight += lastWeight;
-            if (totalWeight >= threshold) {
-                return SIG_VALIDATION_SUCCESS_UINT;
-            }
+        }
+
+        if (totalWeight >= threshold) {
+            return SIG_VALIDATION_SUCCESS_UINT;
         }
 
         return SIG_VALIDATION_FAILED_UINT;
@@ -223,7 +256,8 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         address signer;
         address lastSigner = address(0);
 
-        for (uint256 i = 0; i < sigCount; i++) {
+        // Process all signatures except the last one
+        for (uint256 i = 0; i < sigCount - 1; i++) {
             signer = ECDSA.tryRecoverCalldata(hash, sig[i * 65:(i + 1) * 65]);
 
             // Enforce sorted order to prevent signature reuse
@@ -232,10 +266,30 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
             }
             lastSigner = signer;
 
-            totalWeight += guardian[signer][id][account].weight;
+            uint24 guardianWeight = guardian[signer][id][account].weight;
+            // Revert if non-last signer has zero weight (prevents gas griefing)
+            if (guardianWeight == 0) {
+                revert ZeroWeightSigner();
+            }
+            totalWeight += guardianWeight;
             if (totalWeight >= strg.threshold) {
                 return ERC1271_MAGICVALUE;
             }
+        }
+
+        // Process last signature
+        signer = ECDSA.tryRecoverCalldata(hash, sig[sig.length - 65:]);
+        if (signer <= lastSigner) {
+            return ERC1271_INVALID;
+        }
+        uint24 lastWeight = guardian[signer][id][account].weight;
+        // If last signer has zero weight, return invalid (don't revert)
+        if (lastWeight == 0) {
+            return ERC1271_INVALID;
+        }
+        totalWeight += lastWeight;
+        if (totalWeight >= strg.threshold) {
+            return ERC1271_MAGICVALUE;
         }
 
         return ERC1271_INVALID;
@@ -261,7 +315,8 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         address signer;
         address lastSigner = address(0);
 
-        for (uint256 i = 0; i < sigCount; i++) {
+        // Process all signatures except the last one
+        for (uint256 i = 0; i < sigCount - 1; i++) {
             signer = ECDSA.tryRecoverCalldata(hash, sig[i * 65:(i + 1) * 65]);
 
             if (signer <= lastSigner) {
@@ -270,12 +325,29 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
             lastSigner = signer;
 
             uint24 guardianWeight = _memoryGuardianWeight(signer, guardians, weights);
-            if (guardianWeight > 0) {
-                totalWeight += guardianWeight;
-                if (totalWeight >= threshold) {
-                    return true;
-                }
+            // Revert if non-last signer has zero weight (prevents gas griefing)
+            if (guardianWeight == 0) {
+                revert ZeroWeightSigner();
             }
+            totalWeight += guardianWeight;
+            if (totalWeight >= threshold) {
+                return true;
+            }
+        }
+
+        // Process last signature
+        signer = ECDSA.tryRecoverCalldata(hash, sig[sig.length - 65:]);
+        if (signer <= lastSigner) {
+            return false;
+        }
+        uint24 lastGuardianWeight = _memoryGuardianWeight(signer, guardians, weights);
+        // If last signer has zero weight, return false (don't revert)
+        if (lastGuardianWeight == 0) {
+            return false;
+        }
+        totalWeight += lastGuardianWeight;
+        if (totalWeight >= threshold) {
+            return true;
         }
 
         return false;

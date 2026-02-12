@@ -174,6 +174,52 @@ contract WeightedECDSASignerTest is SignerTestBase, StatelessValidatorTestBase, 
         assertEq(totalWeight, 0);
     }
 
+    // Override base tests - with zero-weight signers that are not last, we now revert
+    function testSignerIsValidSignatureWithSenderFail() public payable override {
+        WeightedECDSASigner signerModule = WeightedECDSASigner(address(module));
+        vm.startPrank(WALLET);
+        signerModule.onInstall(abi.encodePacked(signerId(), installData()));
+        vm.stopPrank();
+
+        bytes32 testHash = keccak256(abi.encodePacked("TEST_HASH"));
+        (, bytes memory signature) = erc1271Signature(testHash, false);
+
+        // With invalid signatures, recovered addresses are non-guardians with zero weight
+        // Since first signer is not last and has zero weight, it should revert
+        vm.startPrank(WALLET);
+        vm.expectRevert(WeightedECDSASigner.ZeroWeightSigner.selector);
+        signerModule.checkSignature(signerId(), address(0), testHash, signature);
+        vm.stopPrank();
+    }
+
+    function testStatlessValidatorFail() external override {
+        WeightedECDSASigner validatorModule = WeightedECDSASigner(address(module));
+
+        bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
+        (, bytes memory sig) = statelessValidationSignature(message, false);
+
+        // With invalid signatures, recovered addresses are non-guardians with zero weight
+        // Since first signer is not last and has zero weight, it should revert
+        vm.startPrank(WALLET);
+        vm.expectRevert(WeightedECDSASigner.ZeroWeightSigner.selector);
+        validatorModule.validateSignatureWithData(message, sig, installData());
+        vm.stopPrank();
+    }
+
+    function testStatelessValidatorWithSenderFail() external override {
+        WeightedECDSASigner validatorModule = WeightedECDSASigner(address(module));
+
+        bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
+        (, bytes memory sig) = statelessValidationSignatureWithSender(message, false);
+
+        // With invalid signatures, recovered addresses are non-guardians with zero weight
+        // Since first signer is not last and has zero weight, it should revert
+        vm.startPrank(WALLET);
+        vm.expectRevert(WeightedECDSASigner.ZeroWeightSigner.selector);
+        validatorModule.validateSignatureWithDataWithSender(address(0), message, sig, installData());
+        vm.stopPrank();
+    }
+
     // Additional tests specific to WeightedECDSASigner
 
     function testWeightedSignatureWithSingleGuardian() public {
@@ -230,5 +276,153 @@ contract WeightedECDSASignerTest is SignerTestBase, StatelessValidatorTestBase, 
         vm.stopPrank();
 
         assertTrue(result == 0x1626ba7e);
+    }
+
+    // Test for TOB-KERNEL-16: Verify userOpHash must always be validated
+    // Even if proposalHash signatures reach threshold, validation must fail
+    // if the last signature (userOpHash) is not from a valid guardian
+    function testUserOpHashMustBeValidated() public {
+        WeightedECDSASigner signerModule = WeightedECDSASigner(address(module));
+        vm.startPrank(WALLET);
+        signerModule.onInstall(abi.encodePacked(signerId(), installData()));
+        vm.stopPrank();
+
+        // Create a userOp
+        PackedUserOperation memory userOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 1,
+            initCode: "",
+            callData: hex"1234",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: ""
+        });
+
+        bytes32 userOpHash = ENTRYPOINT.getUserOpHash(userOp);
+
+        // Compute proposalHash
+        bytes32 domainSeparator = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256("WeightedECDSASigner"),
+                keccak256("0.0.2"),
+                block.chainid,
+                address(module)
+            )
+        );
+
+        bytes32 proposalHash = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                domainSeparator,
+                keccak256(
+                    abi.encode(
+                        keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce)"),
+                        userOp.sender,
+                        signerId(),
+                        keccak256(userOp.callData),
+                        userOp.nonce
+                    )
+                )
+            )
+        );
+
+        // Create a non-guardian account to sign userOpHash
+        (address nonGuardian, uint256 nonGuardianKey) = makeAddrAndKey("nonGuardian");
+
+        // Have guardian1 (weight 50) and guardian2 (weight 30) sign proposalHash
+        // Total = 80 >= threshold 60, so old code would return success early
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(guardian1Key, proposalHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(guardian2Key, proposalHash);
+        // Have non-guardian sign userOpHash (this should fail validation)
+        (uint8 v3, bytes32 r3, bytes32 s3) = vm.sign(nonGuardianKey, userOpHash);
+
+        // Sort first two signatures, last one is userOpHash signature
+        bytes memory signature;
+        if (guardian1 < guardian2) {
+            signature = abi.encodePacked(r1, s1, v1, r2, s2, v2, r3, s3, v3);
+        } else {
+            signature = abi.encodePacked(r2, s2, v2, r1, s1, v1, r3, s3, v3);
+        }
+
+        userOp.signature = signature;
+
+        vm.startPrank(WALLET);
+        uint256 result = signerModule.checkUserOpSignature(signerId(), userOp, userOpHash);
+        vm.stopPrank();
+
+        // Should FAIL because last signer (userOpHash) is not a valid guardian
+        // This tests the fix for TOB-KERNEL-16
+        assertEq(result, 1); // SIG_VALIDATION_FAILED_UINT
+    }
+
+    // Test that same guardian signing both proposalHash and userOpHash doesn't double-count weight
+    function testNoDoubleCountingWeight() public {
+        WeightedECDSASigner signerModule = WeightedECDSASigner(address(module));
+        vm.startPrank(WALLET);
+        signerModule.onInstall(abi.encodePacked(signerId(), installData()));
+        vm.stopPrank();
+
+        // Create a userOp
+        PackedUserOperation memory userOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 1,
+            initCode: "",
+            callData: hex"1234",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: ""
+        });
+
+        bytes32 userOpHash = ENTRYPOINT.getUserOpHash(userOp);
+
+        // Compute proposalHash
+        bytes32 domainSeparator = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256("WeightedECDSASigner"),
+                keccak256("0.0.2"),
+                block.chainid,
+                address(module)
+            )
+        );
+
+        bytes32 proposalHash = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                domainSeparator,
+                keccak256(
+                    abi.encode(
+                        keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce)"),
+                        userOp.sender,
+                        signerId(),
+                        keccak256(userOp.callData),
+                        userOp.nonce
+                    )
+                )
+            )
+        );
+
+        // Guardian1 (weight 50) signs proposalHash
+        // Guardian1 also signs userOpHash (should not add weight twice)
+        // Total weight should be 50, not 100
+        // Threshold is 60, so this should FAIL
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(guardian1Key, proposalHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(guardian1Key, userOpHash);
+
+        bytes memory signature = abi.encodePacked(r1, s1, v1, r2, s2, v2);
+        userOp.signature = signature;
+
+        vm.startPrank(WALLET);
+        uint256 result = signerModule.checkUserOpSignature(signerId(), userOp, userOpHash);
+        vm.stopPrank();
+
+        // Should FAIL because guardian1's weight (50) is only counted once, not twice
+        // 50 < threshold (60)
+        assertEq(result, 1); // SIG_VALIDATION_FAILED_UINT
     }
 }
