@@ -4,6 +4,7 @@ pragma solidity ^0.8.0;
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 import {IAccountExecute} from "account-abstraction/interfaces/IAccountExecute.sol";
 import {IERC7579Execution} from "openzeppelin-contracts/contracts/interfaces/draft-IERC7579.sol";
+import {LibERC7579} from "solady/accounts/LibERC7579.sol";
 import {IModule, IStatelessValidator, IStatelessValidatorWithSender} from "src/interfaces/IERC7579Modules.sol";
 import {PolicyBase} from "src/base/PolicyBase.sol";
 import {
@@ -244,7 +245,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
      * @notice Check if calldata is a no-op operation
      * @dev Recognizes 4 forms of no-op:
      *      1. Empty calldata
-     *      2. ERC-7579 execute(mode=0x00, "") — single-call with empty execution data
+     *      2. ERC-7579 execute(mode=0x00, abi.encodePacked(address(0), uint256(0))) — single-call, zero-target, zero-value, no inner calldata
      *      3. executeUserOp + empty inner calldata (just the 4-byte selector)
      *      4. executeUserOp + ERC-7579 execute no-op (selector + form 2)
      */
@@ -254,7 +255,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         // Case 1: Empty calldata
         if (len == 0) return true;
 
-        // Case 2: ERC-7579 execute with empty execution data
+        // Case 2: ERC-7579 execute with minimal no-op execution data
         if (_isNoOpERC7579Execute(callData)) return true;
 
         // Cases 3 & 4: executeUserOp wrapper
@@ -269,22 +270,41 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
     }
 
     /**
-     * @notice Check if calldata is an ERC-7579 execute call with empty execution data
+     * @notice Check if calldata is an ERC-7579 execute call that performs a zero-value no-op
      * @dev execute(bytes32 mode, bytes calldata executionCalldata) where:
-     *      - mode byte 0 is 0x00 (single call, not batch/delegatecall)
-     *      - executionCalldata is empty
-     *      ABI layout: selector(4) + mode(32) + offset(32) + length(32) = 100 bytes
+     *      - mode is CALLTYPE_SINGLE (not batch/delegatecall)
+     *      - executionCalldata decodes via LibERC7579.decodeSingle() to (address(0), 0, empty)
+     *      - target is address(0) (a non-zero target could trigger receive()/fallback() side effects)
+     *      - value is 0 (no ETH transfer)
+     *      - no inner calldata
      */
     function _isNoOpERC7579Execute(bytes calldata callData) internal pure returns (bool) {
-        if (callData.length != 100) return false;
+        // Minimum: selector(4) + mode(32) + ABI bytes header: offset(32) + length(32) = 100
+        if (callData.length < 100) return false;
         if (bytes4(callData[0:4]) != IERC7579Execution.execute.selector) return false;
-        // Mode byte must be 0x00 (single call, not delegatecall or batch)
-        if (callData[4] != 0x00) return false;
-        // Offset must be 64 (standard ABI encoding for dynamic param after one fixed param)
-        if (uint256(bytes32(callData[36:68])) != 64) return false;
-        // Execution data length must be 0
-        if (uint256(bytes32(callData[68:100])) != 0) return false;
-        return true;
+
+        // Decode mode and check call type via LibERC7579
+        bytes32 mode = bytes32(callData[4:36]);
+        if (LibERC7579.getCallType(mode) != LibERC7579.CALLTYPE_SINGLE) return false;
+
+        // Extract executionCalldata from ABI-encoded bytes parameter
+        uint256 offset = uint256(bytes32(callData[36:68]));
+        uint256 lenPos = 4 + offset;
+        if (callData.length < lenPos + 32) return false;
+        uint256 dataLen = uint256(bytes32(callData[lenPos:lenPos + 32]));
+        uint256 dataPos = lenPos + 32;
+        if (callData.length < dataPos + dataLen) return false;
+
+        bytes calldata executionCalldata = callData[dataPos:dataPos + dataLen];
+
+        // decodeSingle requires length > 0x33 (target(20) + value(32) minimum)
+        if (executionCalldata.length <= 0x33) return false;
+
+        // Use LibERC7579 to decode — same decoding path the account uses
+        (address target, uint256 val, bytes calldata innerCalldata) = LibERC7579.decodeSingle(executionCalldata);
+
+        // No-op: zero target, zero value, and no inner calldata
+        return target == address(0) && val == 0 && innerCalldata.length == 0;
     }
 
     /**
