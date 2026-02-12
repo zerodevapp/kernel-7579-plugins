@@ -20,8 +20,16 @@ import {
     ERC1271_INVALID
 } from "src/types/Constants.sol";
 
-contract SignaturePolicy is PolicyBase, IStatelessValidatorWithSender {
+/**
+ * @title CallerPolicy
+ * @notice A policy that restricts which protocols (callers) can request ERC-1271 signatures
+ * @dev This policy validates the REQUESTING PROTOCOL (sender), not the actual signer.
+ *      Use case: Only allow specific protocols (e.g., Permit2, Uniswap) to request signatures.
+ *      If you need to validate who signed, use a signer module instead.
+ */
+contract CallerPolicy is PolicyBase, IStatelessValidatorWithSender {
     mapping(bytes32 id => mapping(address => Status)) public status;
+    /// @notice Maps policy ID => requesting protocol => wallet => whether protocol is allowed
     mapping(bytes32 id => mapping(address caller => mapping(address wallet => bool))) public allowedCaller;
 
     function isModuleType(uint256 typeID) external pure override(IModule, PolicyBase) returns (bool) {
@@ -74,9 +82,11 @@ contract SignaturePolicy is PolicyBase, IStatelessValidatorWithSender {
     }
 
     function _policyOninstall(bytes32 id, bytes calldata _data) internal override {
-        require(status[id][msg.sender] == Status.NA);
+        require(status[id][msg.sender] == Status.NA, "Already installed");
         address[] memory callers = abi.decode(_data, (address[]));
+        require(callers.length > 0, "Empty callers array");
         for (uint256 i = 0; i < callers.length; i++) {
+            require(callers[i] != address(0), "Zero address caller");
             allowedCaller[id][callers[i]][msg.sender] = true;
         }
         status[id][msg.sender] = Status.Live;
