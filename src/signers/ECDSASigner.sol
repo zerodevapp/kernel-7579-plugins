@@ -15,6 +15,9 @@ import {
 } from "src/types/Constants.sol";
 
 contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWithSender {
+    error InvalidDataLength();
+    error ZeroAddressSigner();
+
     mapping(bytes32 id => mapping(address wallet => address)) public signer;
 
     function isModuleType(uint256 typeID) external pure override(IModule, SignerBase) returns (bool) {
@@ -38,6 +41,8 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
         returns (uint256)
     {
         address owner = signer[id][msg.sender];
+        // Fail if signer is not installed (prevents matching with failed recovery)
+        if (owner == address(0)) return SIG_VALIDATION_FAILED_UINT;
         return _verifySignature(userOpHash, userOp.signature, owner)
             ? SIG_VALIDATION_SUCCESS_UINT
             : SIG_VALIDATION_FAILED_UINT;
@@ -50,12 +55,17 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
         returns (bytes4)
     {
         address owner = signer[id][msg.sender];
+        // Fail if signer is not installed (prevents matching with failed recovery)
+        if (owner == address(0)) return ERC1271_INVALID;
         return _verifySignature(hash, sig, owner) ? ERC1271_MAGICVALUE : ERC1271_INVALID;
     }
 
     function _signerOninstall(bytes32 id, bytes calldata _data) internal override {
-        require(signer[id][msg.sender] == address(0));
-        signer[id][msg.sender] = address(bytes20(_data[0:20]));
+        require(signer[id][msg.sender] == address(0), "Already installed");
+        if (_data.length != 20) revert InvalidDataLength();
+        address signerAddr = address(bytes20(_data[0:20]));
+        if (signerAddr == address(0)) revert ZeroAddressSigner();
+        signer[id][msg.sender] = signerAddr;
     }
 
     function _signerOnUninstall(bytes32 id, bytes calldata) internal override {
