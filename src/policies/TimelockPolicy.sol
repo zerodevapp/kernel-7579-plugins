@@ -360,9 +360,8 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         TimelockConfig storage config = timelockConfig[id][account];
         if (!config.initialized) return SIG_VALIDATION_FAILED_UINT;
 
-        // Check if this is a proposal creation request
-        // Criteria: calldata is a no-op AND signature has proposal data (length >= 65)
-        if (_isNoOpCalldata(userOp.callData) && sig.length >= 65) {
+        // Check if this is a proposal creation request (no-op calldata with proposal data in sig)
+        if (_isNoOpCalldata(userOp.callData)) {
             return _handleProposalCreationInternal(id, userOp, config, sig, account);
         }
 
