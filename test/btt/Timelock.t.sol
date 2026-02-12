@@ -1025,4 +1025,255 @@ contract TimelockTest is Test {
         assertEq(storedGuardian, guardian, "Guardian should be stored in config");
         assertTrue(initialized, "Should be initialized");
     }
+
+    // ============ Guardian Isolation and Advanced Tests ============
+
+    function test_GivenGuardianForPolicyA_CannotCancelProposalInPolicyB() external whenTestingGuardianCancellation {
+        // it should revert with OnlyAccount when guardian from policy A tries to cancel policy B proposal
+        address wallet = address(0xA100);
+        address guardianA = address(0xBEEF10);
+        bytes32 policyIdA = bytes32(uint256(10));
+        bytes32 policyIdB = bytes32(uint256(11));
+
+        // Install policy A with guardianA
+        bytes memory installDataA = abi.encode(policyIdA, DELAY, EXPIRATION, guardianA);
+        vm.prank(wallet);
+        timelockPolicy.onInstall(installDataA);
+
+        // Install policy B with no guardian
+        bytes memory installDataB = abi.encode(policyIdB, DELAY, EXPIRATION, address(0));
+        vm.prank(wallet);
+        timelockPolicy.onInstall(installDataB);
+
+        // Create proposal under policy B
+        bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "policy_b_test");
+        uint256 nonce = 3000;
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory noopOp = _createNoopUserOp(wallet, sig);
+        vm.prank(wallet);
+        timelockPolicy.checkUserOpPolicy(policyIdB, noopOp);
+
+        // Guardian A tries to cancel proposal in policy B — should fail
+        vm.prank(guardianA);
+        vm.expectRevert(TimelockPolicy.OnlyAccount.selector);
+        timelockPolicy.cancelProposal(policyIdB, wallet, callData, nonce);
+
+        // Verify proposal is still pending
+        (TimelockPolicy.ProposalStatus status,,) =
+            timelockPolicy.getProposal(wallet, callData, nonce, policyIdB, wallet);
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should still be pending");
+    }
+
+    function test_GivenGuardianForWalletA_CannotCancelProposalForWalletB() external whenTestingGuardianCancellation {
+        // it should revert with OnlyAccount when guardian for wallet A tries to cancel wallet B proposal
+        address walletA = address(0xA200);
+        address walletB = address(0xA201);
+        address guardianA = address(0xBEEF20);
+        bytes32 sharedPolicyId = bytes32(uint256(20));
+
+        // Install policy for wallet A with guardianA
+        bytes memory installDataA = abi.encode(sharedPolicyId, DELAY, EXPIRATION, guardianA);
+        vm.prank(walletA);
+        timelockPolicy.onInstall(installDataA);
+
+        // Install policy for wallet B with no guardian
+        bytes memory installDataB = abi.encode(sharedPolicyId, DELAY, EXPIRATION, address(0));
+        vm.prank(walletB);
+        timelockPolicy.onInstall(installDataB);
+
+        // Create proposal for wallet B
+        bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "wallet_b_test");
+        uint256 nonce = 3100;
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory noopOp = _createNoopUserOp(walletB, sig);
+        vm.prank(walletB);
+        timelockPolicy.checkUserOpPolicy(sharedPolicyId, noopOp);
+
+        // Guardian A tries to cancel wallet B's proposal — should fail
+        vm.prank(guardianA);
+        vm.expectRevert(TimelockPolicy.OnlyAccount.selector);
+        timelockPolicy.cancelProposal(sharedPolicyId, walletB, callData, nonce);
+
+        // Verify wallet B's proposal is still pending
+        (TimelockPolicy.ProposalStatus status,,) =
+            timelockPolicy.getProposal(walletB, callData, nonce, sharedPolicyId, walletB);
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should still be pending");
+    }
+
+    function test_GivenProposalIsExecuted_GuardianCannotCancel() external whenTestingGuardianCancellation {
+        // it should revert with ProposalNotPending after proposal is executed
+        address guardianWallet = address(0xA300);
+        address guardian = address(0xBEEF30);
+        bytes32 guardianPolicyId = bytes32(uint256(30));
+
+        bytes memory installData = abi.encode(guardianPolicyId, DELAY, EXPIRATION, guardian);
+        vm.prank(guardianWallet);
+        timelockPolicy.onInstall(installData);
+
+        // Create and execute proposal
+        bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "execute_test");
+        uint256 nonce = 3200;
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory noopOp = _createNoopUserOp(guardianWallet, sig);
+        vm.prank(guardianWallet);
+        timelockPolicy.checkUserOpPolicy(guardianPolicyId, noopOp);
+
+        // Warp past delay and execute
+        vm.warp(block.timestamp + DELAY + 1);
+        PackedUserOperation memory executeOp = _createUserOpWithCalldata(guardianWallet, callData, nonce, "");
+        vm.prank(guardianWallet);
+        timelockPolicy.checkUserOpPolicy(guardianPolicyId, executeOp);
+
+        // Guardian tries to cancel executed proposal — should fail
+        vm.prank(guardian);
+        vm.expectRevert(TimelockPolicy.ProposalNotPending.selector);
+        timelockPolicy.cancelProposal(guardianPolicyId, guardianWallet, callData, nonce);
+    }
+
+    function test_GivenProposalIsCancelled_GuardianCannotCancelAgain() external whenTestingGuardianCancellation {
+        // it should revert with ProposalNotPending on double cancel
+        address guardianWallet = address(0xA400);
+        address guardian = address(0xBEEF40);
+        bytes32 guardianPolicyId = bytes32(uint256(40));
+
+        bytes memory installData = abi.encode(guardianPolicyId, DELAY, EXPIRATION, guardian);
+        vm.prank(guardianWallet);
+        timelockPolicy.onInstall(installData);
+
+        // Create proposal
+        bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "cancel_test");
+        uint256 nonce = 3300;
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory noopOp = _createNoopUserOp(guardianWallet, sig);
+        vm.prank(guardianWallet);
+        timelockPolicy.checkUserOpPolicy(guardianPolicyId, noopOp);
+
+        // Guardian cancels
+        vm.prank(guardian);
+        timelockPolicy.cancelProposal(guardianPolicyId, guardianWallet, callData, nonce);
+
+        // Guardian tries to cancel again — should fail
+        vm.prank(guardian);
+        vm.expectRevert(TimelockPolicy.ProposalNotPending.selector);
+        timelockPolicy.cancelProposal(guardianPolicyId, guardianWallet, callData, nonce);
+    }
+
+    function test_GivenDelayPassed_GuardianCanStillCancel() external whenTestingGuardianCancellation {
+        // it should allow guardian to cancel even when proposal is executable
+        address guardianWallet = address(0xA500);
+        address guardian = address(0xBEEF50);
+        bytes32 guardianPolicyId = bytes32(uint256(50));
+
+        bytes memory installData = abi.encode(guardianPolicyId, DELAY, EXPIRATION, guardian);
+        vm.prank(guardianWallet);
+        timelockPolicy.onInstall(installData);
+
+        // Create proposal
+        bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "after_delay");
+        uint256 nonce = 3400;
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory noopOp = _createNoopUserOp(guardianWallet, sig);
+        vm.prank(guardianWallet);
+        timelockPolicy.checkUserOpPolicy(guardianPolicyId, noopOp);
+
+        // Warp past delay — proposal is now executable
+        vm.warp(block.timestamp + DELAY + 1);
+
+        // Guardian cancels even though proposal is executable
+        vm.prank(guardian);
+        timelockPolicy.cancelProposal(guardianPolicyId, guardianWallet, callData, nonce);
+
+        (TimelockPolicy.ProposalStatus status,,) =
+            timelockPolicy.getProposal(guardianWallet, callData, nonce, guardianPolicyId, guardianWallet);
+        assertEq(
+            uint256(status), uint256(TimelockPolicy.ProposalStatus.Cancelled), "Guardian should cancel even after delay"
+        );
+
+        // Verify execution now fails
+        PackedUserOperation memory executeOp = _createUserOpWithCalldata(guardianWallet, callData, nonce, "");
+        vm.prank(guardianWallet);
+        uint256 result = timelockPolicy.checkUserOpPolicy(guardianPolicyId, executeOp);
+        assertEq(result, SIG_VALIDATION_FAILED, "Execution should fail after guardian cancel");
+    }
+
+    function test_GivenReinstallWithNewGuardian_OldGuardianCannotCancel() external whenTestingGuardianCancellation {
+        // it should prevent old guardian from canceling after reinstall with new guardian
+        address guardianWallet = address(0xA600);
+        address oldGuardian = address(0xBEEF60);
+        address newGuardian = address(0xBEEF61);
+        bytes32 guardianPolicyId = bytes32(uint256(60));
+
+        // Install with old guardian
+        bytes memory installData1 = abi.encode(guardianPolicyId, DELAY, EXPIRATION, oldGuardian);
+        vm.prank(guardianWallet);
+        timelockPolicy.onInstall(installData1);
+
+        // Uninstall
+        vm.prank(guardianWallet);
+        timelockPolicy.onUninstall(abi.encode(guardianPolicyId));
+
+        // Reinstall with new guardian
+        bytes memory installData2 = abi.encode(guardianPolicyId, DELAY, EXPIRATION, newGuardian);
+        vm.prank(guardianWallet);
+        timelockPolicy.onInstall(installData2);
+
+        // Create proposal under new installation
+        bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "reinstall_test");
+        uint256 nonce = 3500;
+        bytes memory sig = _createProposalSignature(callData, nonce);
+        PackedUserOperation memory noopOp = _createNoopUserOp(guardianWallet, sig);
+        vm.prank(guardianWallet);
+        timelockPolicy.checkUserOpPolicy(guardianPolicyId, noopOp);
+
+        // Old guardian tries to cancel — should fail
+        vm.prank(oldGuardian);
+        vm.expectRevert(TimelockPolicy.OnlyAccount.selector);
+        timelockPolicy.cancelProposal(guardianPolicyId, guardianWallet, callData, nonce);
+
+        // New guardian can cancel
+        vm.prank(newGuardian);
+        timelockPolicy.cancelProposal(guardianPolicyId, guardianWallet, callData, nonce);
+
+        (TimelockPolicy.ProposalStatus status,,) =
+            timelockPolicy.getProposal(guardianWallet, callData, nonce, guardianPolicyId, guardianWallet);
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Cancelled), "New guardian should cancel");
+    }
+
+    function test_GivenGuardianCancels_NewProposalWithDifferentNonceWorks() external whenTestingGuardianCancellation {
+        // it should allow re-proposal with different nonce after guardian cancel
+        address guardianWallet = address(0xA700);
+        address guardian = address(0xBEEF70);
+        bytes32 guardianPolicyId = bytes32(uint256(70));
+
+        bytes memory installData = abi.encode(guardianPolicyId, DELAY, EXPIRATION, guardian);
+        vm.prank(guardianWallet);
+        timelockPolicy.onInstall(installData);
+
+        // Create and cancel first proposal
+        bytes memory callData = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "reproposal");
+        uint256 nonce1 = 3600;
+        bytes memory sig1 = _createProposalSignature(callData, nonce1);
+        PackedUserOperation memory noopOp1 = _createNoopUserOp(guardianWallet, sig1);
+        vm.prank(guardianWallet);
+        timelockPolicy.checkUserOpPolicy(guardianPolicyId, noopOp1);
+
+        vm.prank(guardian);
+        timelockPolicy.cancelProposal(guardianPolicyId, guardianWallet, callData, nonce1);
+
+        // Create new proposal with different nonce, same calldata
+        uint256 nonce2 = 3601;
+        bytes memory sig2 = _createProposalSignature(callData, nonce2);
+        PackedUserOperation memory noopOp2 = _createNoopUserOp(guardianWallet, sig2);
+        vm.prank(guardianWallet);
+        uint256 result = timelockPolicy.checkUserOpPolicy(guardianPolicyId, noopOp2);
+        assertEq(result, 0, "New proposal creation should succeed");
+
+        // Verify new proposal exists and old is cancelled
+        (TimelockPolicy.ProposalStatus status1,,) =
+            timelockPolicy.getProposal(guardianWallet, callData, nonce1, guardianPolicyId, guardianWallet);
+        (TimelockPolicy.ProposalStatus status2,,) =
+            timelockPolicy.getProposal(guardianWallet, callData, nonce2, guardianPolicyId, guardianWallet);
+        assertEq(uint256(status1), uint256(TimelockPolicy.ProposalStatus.Cancelled), "Old proposal should be cancelled");
+        assertEq(uint256(status2), uint256(TimelockPolicy.ProposalStatus.Pending), "New proposal should be pending");
+    }
 }

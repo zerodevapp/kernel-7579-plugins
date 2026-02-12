@@ -968,4 +968,94 @@ contract TimelockEntryPointTest is Test {
         assertEq(uint256(statusA), uint256(TimelockPolicy.ProposalStatus.Executed));
         assertEq(uint256(statusB), uint256(TimelockPolicy.ProposalStatus.Cancelled));
     }
+
+    // ============ 21. Guardian Cancel Direct Call Prevents EntryPoint Execution ============
+
+    /// @notice Guardian cancels proposal via direct call, then execution UserOp through EntryPoint fails
+    function testEntryPoint_GuardianDirectCancelBlocksEntryPointExecution() public {
+        // Setup: Create a new account with a real guardian
+        address guardian = makeAddr("guardian");
+        bytes32 guardianPolicyId = bytes32(uint256(100));
+
+        // Deploy new account and policy with guardian
+        MockTimelockAccount accountWithGuardian = new MockTimelockAccount(entryPoint, policy, guardianPolicyId);
+        vm.deal(address(accountWithGuardian), 100 ether);
+
+        // Install policy with guardian
+        vm.prank(address(accountWithGuardian));
+        policy.onInstall(abi.encode(guardianPolicyId, DELAY, EXPIRATION, guardian));
+
+        // Step 1: Create proposal via EntryPoint
+        bytes memory proposalCallData = abi.encodeCall(MockTimelockAccount.setValue, (777));
+        uint256 proposalNonce = entryPoint.getNonce(address(accountWithGuardian), 1); // key=1 for execution
+        uint256 creationNonce = entryPoint.getNonce(address(accountWithGuardian), 0); // key=0 for creation
+
+        PackedUserOperation memory creationOp = PackedUserOperation({
+            sender: address(accountWithGuardian),
+            nonce: creationNonce,
+            initCode: "",
+            callData: "", // no-op calldata
+            accountGasLimits: bytes32(abi.encodePacked(uint128(500_000), uint128(500_000))),
+            preVerificationGas: 100_000,
+            gasFees: bytes32(abi.encodePacked(uint128(1 gwei), uint128(1 gwei))),
+            paymasterAndData: "",
+            signature: _proposalSig(proposalCallData, proposalNonce)
+        });
+
+        PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+        ops[0] = creationOp;
+        vm.prank(BUNDLER, BUNDLER);
+        entryPoint.handleOps(ops, BENEFICIARY);
+
+        // Verify proposal was created
+        (TimelockPolicy.ProposalStatus statusBefore,,) = policy.getProposal(
+            address(accountWithGuardian),
+            proposalCallData,
+            proposalNonce,
+            guardianPolicyId,
+            address(accountWithGuardian)
+        );
+        assertEq(uint256(statusBefore), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should be pending");
+
+        // Step 2: Guardian calls cancelProposal directly (not through EntryPoint)
+        vm.prank(guardian);
+        policy.cancelProposal(guardianPolicyId, address(accountWithGuardian), proposalCallData, proposalNonce);
+
+        // Verify proposal is cancelled
+        (TimelockPolicy.ProposalStatus statusAfterCancel,,) = policy.getProposal(
+            address(accountWithGuardian),
+            proposalCallData,
+            proposalNonce,
+            guardianPolicyId,
+            address(accountWithGuardian)
+        );
+        assertEq(
+            uint256(statusAfterCancel), uint256(TimelockPolicy.ProposalStatus.Cancelled), "Proposal should be cancelled"
+        );
+
+        // Step 3: Warp past delay and try to execute via EntryPoint — should fail
+        vm.warp(block.timestamp + DELAY + 1);
+
+        PackedUserOperation memory executionOp = PackedUserOperation({
+            sender: address(accountWithGuardian),
+            nonce: proposalNonce,
+            initCode: "",
+            callData: proposalCallData,
+            accountGasLimits: bytes32(abi.encodePacked(uint128(500_000), uint128(500_000))),
+            preVerificationGas: 100_000,
+            gasFees: bytes32(abi.encodePacked(uint128(1 gwei), uint128(1 gwei))),
+            paymasterAndData: "",
+            signature: "" // signature irrelevant for execution path
+        });
+
+        // Execution should revert because proposal is cancelled
+        PackedUserOperation[] memory execOps = new PackedUserOperation[](1);
+        execOps[0] = executionOp;
+        vm.prank(BUNDLER, BUNDLER);
+        vm.expectRevert();
+        entryPoint.handleOps(execOps, BENEFICIARY);
+
+        // Verify state was NOT changed
+        assertEq(accountWithGuardian.value(), 0, "Value should remain 0 after cancelled execution");
+    }
 }
