@@ -241,6 +241,14 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
      * @notice Handle proposal execution from userOp
      * @dev Returns validAfter/validUntil so EntryPoint enforces the timelock window.
      *      The guardian mechanism provides the cancellation path (not a grace period).
+     *
+     *      Design note (TOB-KERNEL-21): A grace period approach was considered — delaying
+     *      executability so the owner has time to cancel. However, if the timelock policy and
+     *      signer are the only validation path on the account, the owner cannot submit a cancel
+     *      UserOp that executes before the proposal becomes valid. The grace period merely shifts
+     *      the timeline without eliminating the race. A guardian address solves this because the
+     *      guardian can call cancelProposal() directly (no UserOp required), providing a reliable
+     *      cancellation path independent of the account's validation flow.
      */
     function _handleProposalExecutionInternal(bytes32 id, PackedUserOperation calldata userOp, address account)
         internal
