@@ -30,6 +30,23 @@ struct GuardianStorage {
     address nextGuardian;
 }
 
+/**
+ * @dev Known limitations:
+ *
+ *      1. Partial userOpHash coverage (TOB-KERNEL-16): Only the last signer signs the userOpHash,
+ *         which covers gas parameters and other mutable UserOp fields. All other signers sign an
+ *         EIP-712 proposalHash that commits to (account, id, callData, nonce) but omits gas fields.
+ *         This is a deliberate design choice — in a multisig flow, requiring all signers to agree
+ *         on exact gas parameters before submission is impractical. The trade-off is that
+ *         non-final signers cannot attest to gas parameters, so the final signer (typically the
+ *         one submitting the UserOp) controls gas settings unilaterally.
+ *
+ *      2. ERC-1271 cross-permission replay (TOB-KERNEL-28): ERC-1271 signatures lack
+ *         permission-level domain separation. A signature validated via checkSignature for one
+ *         permission can be replayed against a different permission on the same account if both
+ *         use this signer. Adding domain separation would break existing integrations.
+ *         Acknowledged as a known risk.
+ */
 contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatelessValidatorWithSender {
     // EIP712 typehash for the Proposal struct
     bytes32 private constant PROPOSAL_TYPEHASH =
