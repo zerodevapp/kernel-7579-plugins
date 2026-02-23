@@ -14,6 +14,12 @@ import {
     ERC1271_INVALID
 } from "src/types/Constants.sol";
 
+/**
+ * @dev Known limitation (TOB-KERNEL-28): ERC-1271 signatures lack permission-level domain
+ *      separation. A signature validated via checkSignature for one permission can be replayed
+ *      against a different permission on the same account if both use this signer. Adding domain
+ *      separation would break existing integrations. Acknowledged as a known risk.
+ */
 contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWithSender {
     mapping(bytes32 id => mapping(address wallet => address)) public signer;
 
