@@ -25,6 +25,13 @@ struct ECDSAValidatorStorage {
     address owner;
 }
 
+/**
+ * @dev Known limitation (TOB-KERNEL-28): ERC-1271 signatures lack permission-level domain
+ *      separation. A signature validated via isValidSignatureWithSender for one permission can
+ *      be replayed against a different permission on the same account if both use this validator.
+ *      Adding domain separation would break existing integrations that depend on the current
+ *      ERC-1271 behavior. Acknowledged as a known risk.
+ */
 contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessValidatorWithSender {
     event OwnerRegistered(address indexed kernel, address indexed owner);
 
