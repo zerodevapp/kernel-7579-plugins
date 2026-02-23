@@ -18,6 +18,30 @@ import {
  * @title TimelockPolicy
  * @notice A policy module that enforces time-delayed execution of transactions for enhanced security
  * @dev Users must first create a proposal, wait for the timelock delay, then execute
+ *
+ * @dev Security assumptions and known limitations:
+ *
+ *      1. Signer trust (TOB-KERNEL-1):
+ *         This policy does not restrict gas parameters. A session key holder can submit no-op
+ *         UserOps with inflated gas to drain the account's EntryPoint deposit. Since this is a
+ *         policy (not a validator), it must be paired with a signer — and that signer must be
+ *         trusted not to grief the account. Integrators should only issue session keys to parties
+ *         they trust, or pair this policy with additional gas-restricting policies.
+ *
+ *      2. Nonce isolation (TOB-KERNEL-1):
+ *         Proposals are keyed to (sender, callDataHash, nonce). This policy assumes the account
+ *         implementation isolates nonce keys per permission, as Kernel does via the ERC-4337
+ *         nonce scheme (192-bit key | 64-bit sequence). If the account does not isolate nonce
+ *         keys, operations from unrelated permissions may advance the sequence and silently
+ *         invalidate pending proposals. Non-Kernel integrators should ensure their nonce scheme
+ *         provides per-permission isolation.
+ *
+ *      3. Nonce head-of-line blocking (TOB-KERNEL-22):
+ *         Within the same nonce key, ERC-4337 enforces sequential ordering. If a proposal targets
+ *         nonce N, the execution UserOp must also use nonce N. Submitting another UserOp under
+ *         the same key before execution will consume that nonce and implicitly cancel the proposal.
+ *         Integrators should use a dedicated nonce channel for timelocked operations to avoid
+ *         accidental invalidation.
  */
 contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorWithSender {
     enum ProposalStatus {
