@@ -17,6 +17,8 @@ import {
 contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWithSender {
     error InvalidDataLength();
     error ZeroAddressSigner();
+    error SignerAlreadySet();
+    error SignerNotSet();
 
     mapping(bytes32 id => mapping(address wallet => address)) public signer;
 
@@ -61,7 +63,7 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
     }
 
     function _signerOninstall(bytes32 id, bytes calldata _data) internal override {
-        require(signer[id][msg.sender] == address(0), "Already installed");
+        require(signer[id][msg.sender] == address(0), SignerAlreadySet());
         if (_data.length != 20) revert InvalidDataLength();
         address signerAddr = address(bytes20(_data[0:20]));
         if (signerAddr == address(0)) revert ZeroAddressSigner();
@@ -69,7 +71,7 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
     }
 
     function _signerOnUninstall(bytes32 id, bytes calldata) internal override {
-        require(signer[id][msg.sender] != address(0));
+        require(signer[id][msg.sender] != address(0), SignerNotSet());
         delete signer[id][msg.sender];
     }
 

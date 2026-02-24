@@ -32,6 +32,7 @@ contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessVal
 
     error InvalidDataLength();
     error ZeroAddressOwner();
+    error SenderNotOwner();
 
     function onInstall(bytes calldata _data) external payable override {
         if (_isInitialized(msg.sender)) revert AlreadyInitialized(msg.sender);
@@ -106,7 +107,7 @@ contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessVal
     }
 
     function preCheck(address msgSender, uint256, bytes calldata) external payable override returns (bytes memory) {
-        require(msgSender == ecdsaValidatorStorage[msg.sender].owner, "ECDSAValidator: sender is not owner");
+        require(msgSender == ecdsaValidatorStorage[msg.sender].owner, SenderNotOwner());
         return hex"";
     }
 

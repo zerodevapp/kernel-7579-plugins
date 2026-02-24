@@ -28,6 +28,9 @@ import {
  *      If you need to validate who signed, use a signer module instead.
  */
 contract CallerPolicy is PolicyBase, IStatelessValidatorWithSender {
+    error PolicyAlreadyInstalled();
+    error PolicyNotLive();
+
     mapping(bytes32 id => mapping(address => Status)) public status;
     /// @notice Maps policy ID => requesting protocol => wallet => whether protocol is allowed
     mapping(bytes32 id => mapping(address caller => mapping(address wallet => bool))) public allowedCaller;
@@ -82,7 +85,7 @@ contract CallerPolicy is PolicyBase, IStatelessValidatorWithSender {
     }
 
     function _policyOninstall(bytes32 id, bytes calldata _data) internal override {
-        require(status[id][msg.sender] == Status.NA, "Already installed");
+        require(status[id][msg.sender] == Status.NA, PolicyAlreadyInstalled());
         address[] memory callers = abi.decode(_data, (address[]));
         require(callers.length > 0, "Empty callers array");
         for (uint256 i = 0; i < callers.length; i++) {
@@ -93,7 +96,7 @@ contract CallerPolicy is PolicyBase, IStatelessValidatorWithSender {
     }
 
     function _policyOnUninstall(bytes32 id, bytes calldata _data) internal override {
-        require(status[id][msg.sender] == Status.Live);
+        require(status[id][msg.sender] == Status.Live, PolicyNotLive());
         status[id][msg.sender] = Status.Deprecated;
     }
 
