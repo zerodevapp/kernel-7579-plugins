@@ -19,7 +19,7 @@ contract TimelockEpochValidationTest is Test {
 
     uint48 constant DELAY = 1 days;
     uint48 constant EXPIRATION_PERIOD = 1 days;
-    uint48 constant GRACE_PERIOD = 1 hours;
+    address constant GUARDIAN_ADDR = address(0);
 
     bytes32 constant POLICY_ID_1 = keccak256("POLICY_ID_1");
     bytes32 constant POLICY_ID_2 = keccak256("POLICY_ID_2");
@@ -31,7 +31,7 @@ contract TimelockEpochValidationTest is Test {
     }
 
     function _installData() internal pure returns (bytes memory) {
-        return abi.encode(DELAY, EXPIRATION_PERIOD, GRACE_PERIOD);
+        return abi.encode(DELAY, EXPIRATION_PERIOD, GUARDIAN_ADDR);
     }
 
     function _installPolicy(address wallet, bytes32 policyId) internal {
@@ -99,7 +99,7 @@ contract TimelockEpochValidationTest is Test {
         assertEq(epochAfter, 1, "Epoch should be 1 after first install");
 
         // it should initialize the policy config
-        (uint48 delay, uint48 expirationPeriod, uint48 gracePeriod_, bool initialized) =
+        (uint48 delay, uint48 expirationPeriod, address guardian_, bool initialized) =
             timelockPolicy.timelockConfig(POLICY_ID_1, WALLET);
         assertTrue(initialized, "Policy should be initialized");
         assertEq(delay, DELAY, "Delay should match");
@@ -166,19 +166,13 @@ contract TimelockEpochValidationTest is Test {
         // it should store the current epoch in the proposal
         // it should be in Pending status with timing set
         bytes32 userOpKey = timelockPolicy.computeUserOpKey(WALLET, callData, nonce);
-        (
-            TimelockPolicy.ProposalStatus status,
-            uint48 validAfter,
-            uint48 graceEnd,
-            uint48 validUntil,
-            uint256 proposalEpoch
-        ) = timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
+        (TimelockPolicy.ProposalStatus status, uint48 validAfter, uint48 validUntil, uint256 proposalEpoch) =
+            timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
 
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should be Pending");
         assertEq(proposalEpoch, 1, "Proposal epoch should match current epoch (1)");
         assertEq(validAfter, block.timestamp + DELAY, "validAfter should be correct");
-        assertEq(graceEnd, block.timestamp + DELAY + GRACE_PERIOD, "graceEnd should be correct");
-        assertEq(validUntil, block.timestamp + DELAY + GRACE_PERIOD + EXPIRATION_PERIOD, "validUntil should be correct");
+        assertEq(validUntil, block.timestamp + DELAY + EXPIRATION_PERIOD, "validUntil should be correct");
     }
 
     function test_GivenCreatingViaNoOpUserOp() external whenCreatingAProposal {
@@ -193,7 +187,7 @@ contract TimelockEpochValidationTest is Test {
 
         // it should record the epoch at creation time (proposal is Pending)
         bytes32 userOpKey = timelockPolicy.computeUserOpKey(WALLET, callData, nonce);
-        (TimelockPolicy.ProposalStatus status,,,, uint256 proposalEpoch) =
+        (TimelockPolicy.ProposalStatus status,,, uint256 proposalEpoch) =
             timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
 
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Should be Pending");
@@ -236,7 +230,7 @@ contract TimelockEpochValidationTest is Test {
 
         // it should mark proposal as executed
         bytes32 userOpKey = timelockPolicy.computeUserOpKey(WALLET, callData, nonce);
-        (TimelockPolicy.ProposalStatus status,,,,) = timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
+        (TimelockPolicy.ProposalStatus status,,,) = timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Executed), "Proposal should be executed");
     }
 
@@ -267,7 +261,7 @@ contract TimelockEpochValidationTest is Test {
 
         // it should not mark proposal as executed (still Pending from epoch 1)
         bytes32 userOpKey = timelockPolicy.computeUserOpKey(WALLET, callData, nonce);
-        (TimelockPolicy.ProposalStatus status,,,,) = timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
+        (TimelockPolicy.ProposalStatus status,,,) = timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should still be Pending");
     }
 
@@ -281,7 +275,7 @@ contract TimelockEpochValidationTest is Test {
         _createProposal(WALLET, POLICY_ID_1, callData, nonce);
 
         bytes32 userOpKey = timelockPolicy.computeUserOpKey(WALLET, callData, nonce);
-        (,,,, uint256 proposalEpoch) = timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
+        (,,, uint256 proposalEpoch) = timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
         assertEq(proposalEpoch, 1, "Proposal should be in epoch 1");
 
         // Warp and do multiple reinstalls to get to epoch 3
@@ -303,7 +297,7 @@ contract TimelockEpochValidationTest is Test {
         assertEq(validationResult, SIG_VALIDATION_FAILED_UINT, "Should reject stale proposal");
 
         // it should leave proposal status unchanged
-        (TimelockPolicy.ProposalStatus statusAfter,,,,) = timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
+        (TimelockPolicy.ProposalStatus statusAfter,,,) = timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
         assertEq(
             uint256(statusAfter),
             uint256(TimelockPolicy.ProposalStatus.Pending),
@@ -386,7 +380,7 @@ contract TimelockEpochValidationTest is Test {
         _createProposal(WALLET, POLICY_ID_1, newCallData, newNonce);
 
         bytes32 newUserOpKey = timelockPolicy.computeUserOpKey(WALLET, newCallData, newNonce);
-        (TimelockPolicy.ProposalStatus status,,,, uint256 newProposalEpoch) =
+        (TimelockPolicy.ProposalStatus status,,, uint256 newProposalEpoch) =
             timelockPolicy.proposals(newUserOpKey, POLICY_ID_1, WALLET);
 
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "New proposal should be Pending");

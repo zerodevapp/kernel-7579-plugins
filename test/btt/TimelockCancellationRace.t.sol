@@ -8,11 +8,11 @@ import {IModule} from "src/interfaces/IERC7579Modules.sol";
 
 /**
  * @title TimelockCancellationRaceTest
- * @notice BTT tests for the TimelockPolicy cancellation and grace period fix (TOB-KERNEL-21)
+ * @notice BTT tests for the TimelockPolicy cancellation logic (TOB-KERNEL-21)
  * @dev This test suite verifies that:
  *      1. Cancelled proposals cannot be executed
- *      2. Grace period prevents race conditions between cancellation and execution
- *      3. The owner can cancel during grace period before public execution
+ *      2. The delay period prevents immediate execution
+ *      3. The owner/guardian can cancel during the delay period before execution
  */
 contract TimelockCancellationRaceTest is Test {
     TimelockPolicy public timelockPolicy;
@@ -22,7 +22,7 @@ contract TimelockCancellationRaceTest is Test {
 
     uint48 constant DELAY = 1 days;
     uint48 constant EXPIRATION_PERIOD = 1 days;
-    uint48 constant GRACE_PERIOD = 1 hours;
+    address constant GUARDIAN_ADDR = address(0);
 
     bytes32 public policyId;
 
@@ -36,7 +36,7 @@ contract TimelockCancellationRaceTest is Test {
 
         // Install policy for WALLET
         vm.startPrank(WALLET);
-        timelockPolicy.onInstall(abi.encodePacked(policyId, abi.encode(DELAY, EXPIRATION_PERIOD, GRACE_PERIOD)));
+        timelockPolicy.onInstall(abi.encodePacked(policyId, abi.encode(DELAY, EXPIRATION_PERIOD, GUARDIAN_ADDR)));
         vm.stopPrank();
     }
 
@@ -100,7 +100,7 @@ contract TimelockCancellationRaceTest is Test {
         _createProposal(TEST_CALLDATA, TEST_NONCE);
 
         // Verify proposal is pending before cancellation
-        (TimelockPolicy.ProposalStatus statusBefore,,,) =
+        (TimelockPolicy.ProposalStatus statusBefore,,) =
             timelockPolicy.getProposal(WALLET, TEST_CALLDATA, TEST_NONCE, policyId, WALLET);
         assertEq(uint256(statusBefore), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should be pending");
 
@@ -113,7 +113,7 @@ contract TimelockCancellationRaceTest is Test {
         _cancelProposal(TEST_CALLDATA, TEST_NONCE);
 
         // Verify: it should set proposal status to Cancelled
-        (TimelockPolicy.ProposalStatus statusAfter,,,) =
+        (TimelockPolicy.ProposalStatus statusAfter,,) =
             timelockPolicy.getProposal(WALLET, TEST_CALLDATA, TEST_NONCE, policyId, WALLET);
         assertEq(uint256(statusAfter), uint256(TimelockPolicy.ProposalStatus.Cancelled), "Proposal should be cancelled");
 
@@ -146,8 +146,8 @@ contract TimelockCancellationRaceTest is Test {
         // Setup: Create a proposal
         _createProposal(TEST_CALLDATA, TEST_NONCE);
 
-        // Fast forward past delay AND grace period
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        // Fast forward past delay
+        vm.warp(block.timestamp + DELAY + 1);
 
         // Execute the proposal
         PackedUserOperation memory userOp = _createUserOp(TEST_CALLDATA, TEST_NONCE);
@@ -156,7 +156,7 @@ contract TimelockCancellationRaceTest is Test {
         assertFalse(validationResult == 1, "Execution should succeed");
 
         // Verify proposal is executed
-        (TimelockPolicy.ProposalStatus status,,,) =
+        (TimelockPolicy.ProposalStatus status,,) =
             timelockPolicy.getProposal(WALLET, TEST_CALLDATA, TEST_NONCE, policyId, WALLET);
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Executed), "Proposal should be executed");
 
@@ -186,8 +186,8 @@ contract TimelockCancellationRaceTest is Test {
         // Setup: Create a proposal
         _createProposal(TEST_CALLDATA, TEST_NONCE);
 
-        // Fast forward past delay and grace period (to make it executable normally)
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        // Fast forward past delay (to make it executable normally)
+        vm.warp(block.timestamp + DELAY + 1);
 
         // Cancel in the same block as execution attempt
         _cancelProposal(TEST_CALLDATA, TEST_NONCE);
@@ -205,8 +205,8 @@ contract TimelockCancellationRaceTest is Test {
         // Setup: Create a proposal
         _createProposal(TEST_CALLDATA, TEST_NONCE);
 
-        // Fast forward past delay and grace period
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        // Fast forward past delay
+        vm.warp(block.timestamp + DELAY + 1);
 
         // Cancel the proposal
         _cancelProposal(TEST_CALLDATA, TEST_NONCE);
@@ -234,7 +234,8 @@ contract TimelockCancellationRaceTest is Test {
 
         // Note: Cancelled proposals persist. Attempting to create via no-op UserOp
         // for the same calldata/nonce returns SIG_VALIDATION_FAILED.
-        bytes memory sig = abi.encodePacked(bytes32(TEST_CALLDATA.length), TEST_CALLDATA, bytes32(TEST_NONCE), bytes1(0x00));
+        bytes memory sig =
+            abi.encodePacked(bytes32(TEST_CALLDATA.length), TEST_CALLDATA, bytes32(TEST_NONCE), bytes1(0x00));
         PackedUserOperation memory retryOp = PackedUserOperation({
             sender: WALLET,
             nonce: 0,
@@ -254,83 +255,43 @@ contract TimelockCancellationRaceTest is Test {
         uint256 newNonce = TEST_NONCE + 1;
         _createProposal(TEST_CALLDATA, newNonce);
 
-        // Fast forward past delay and grace period
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        // Fast forward past delay
+        vm.warp(block.timestamp + DELAY + 1);
 
         // Execute the new proposal
         PackedUserOperation memory userOp = _createUserOp(TEST_CALLDATA, newNonce);
         vm.prank(WALLET);
         uint256 validationResult = timelockPolicy.checkUserOpPolicy(policyId, userOp);
 
-        // Verify: it should allow execution of the new proposal after grace period
+        // Verify: it should allow execution of the new proposal after delay
         assertFalse(validationResult == 1, "New proposal should be executable");
 
         // Verify status is executed
-        (TimelockPolicy.ProposalStatus status,,,) =
+        (TimelockPolicy.ProposalStatus status,,) =
             timelockPolicy.getProposal(WALLET, TEST_CALLDATA, newNonce, policyId, WALLET);
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Executed), "New proposal should be executed");
     }
 
-    // ==================== whenExecutingAProposalDuringTheGracePeriod ====================
+    // ==================== whenExecutingAProposalAfterDelay ====================
 
-    modifier whenExecutingAProposalDuringTheGracePeriod() {
+    modifier whenExecutingAProposalAfterDelay() {
         _;
     }
 
-    function test_GivenTheTimelockDelayHasPassedButGracePeriodHasNot()
-        external
-        whenExecutingAProposalDuringTheGracePeriod
-    {
+    function test_GivenTheDelayHasPassed() external whenExecutingAProposalAfterDelay {
         // Setup: Create a proposal
         uint256 startTime = block.timestamp;
         _createProposal(TEST_CALLDATA, TEST_NONCE);
 
-        // Get expected timing - note: packed validAfter uses graceEnd
-        (,uint256 validAfter, uint256 graceEnd, uint256 validUntil) =
+        // Get expected timing
+        (, uint256 validAfter, uint256 validUntil) =
             timelockPolicy.getProposal(WALLET, TEST_CALLDATA, TEST_NONCE, policyId, WALLET);
 
-        // Fast forward past delay but NOT past grace period
+        // Fast forward past delay
         vm.warp(startTime + DELAY + 1);
 
-        // Verify we are in the grace period window
+        // Verify we are past validAfter
         assertTrue(block.timestamp > validAfter, "Should be past validAfter");
-        assertTrue(block.timestamp < graceEnd, "Should be before graceEnd");
-        assertTrue(block.timestamp < validUntil, "Should be before validUntil");
-
-        // Action: Try to execute
-        PackedUserOperation memory userOp = _createUserOp(TEST_CALLDATA, TEST_NONCE);
-        vm.prank(WALLET);
-        uint256 validationResult = timelockPolicy.checkUserOpPolicy(policyId, userOp);
-
-        // Verify: it should return validation data with graceEnd as validAfter
-        assertFalse(validationResult == 1, "Should not return failure");
-
-        uint48 returnedValidAfter = _extractValidAfter(validationResult);
-        uint48 returnedValidUntil = _extractValidUntil(validationResult);
-
-        // The returned validAfter is graceEnd (not validAfter)
-        // This is the key fix - prevents execution during grace period
-        assertEq(returnedValidAfter, uint48(graceEnd), "validAfter should be graceEnd");
-        assertEq(returnedValidUntil, uint48(validUntil), "validUntil should match proposal expiration");
-
-        // Note: The bundler/EntryPoint would reject execution during grace period
-        // because block.timestamp < returnedValidAfter (graceEnd)
-    }
-
-    function test_GivenTheGracePeriodHasPassed() external whenExecutingAProposalDuringTheGracePeriod {
-        // Setup: Create a proposal
-        uint256 startTime = block.timestamp;
-        _createProposal(TEST_CALLDATA, TEST_NONCE);
-
-        // Get timing info
-        (,uint256 validAfter,, uint256 validUntil) =
-            timelockPolicy.getProposal(WALLET, TEST_CALLDATA, TEST_NONCE, policyId, WALLET);
-
-        // Fast forward past delay AND grace period
-        vm.warp(startTime + DELAY + GRACE_PERIOD + 1);
-
-        // Verify we are past the grace period
-        assertTrue(block.timestamp > validAfter, "Should be past graceEnd");
         assertTrue(block.timestamp < validUntil, "Should be before validUntil");
 
         // Action: Execute
@@ -338,52 +299,84 @@ contract TimelockCancellationRaceTest is Test {
         vm.prank(WALLET);
         uint256 validationResult = timelockPolicy.checkUserOpPolicy(policyId, userOp);
 
-        // Verify: it should return validation data allowing execution
+        // Verify: it should return validation data with validAfter matching proposal
         assertFalse(validationResult == 1, "Should not return failure");
 
         uint48 returnedValidAfter = _extractValidAfter(validationResult);
-        assertTrue(block.timestamp >= returnedValidAfter, "Should be past validAfter for execution");
+        uint48 returnedValidUntil = _extractValidUntil(validationResult);
+
+        assertEq(returnedValidAfter, uint48(validAfter), "validAfter should match proposal");
+        assertEq(returnedValidUntil, uint48(validUntil), "validUntil should match proposal expiration");
 
         // Verify: it should set proposal status to Executed
-        (TimelockPolicy.ProposalStatus status,,,) =
+        (TimelockPolicy.ProposalStatus status,,) =
             timelockPolicy.getProposal(WALLET, TEST_CALLDATA, TEST_NONCE, policyId, WALLET);
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Executed), "Proposal should be executed");
     }
 
-    // ==================== whenTheOwnerCancelsDuringGracePeriod ====================
-
-    modifier whenTheOwnerCancelsDuringGracePeriod() {
-        _;
-    }
-
-    function test_GivenTheProposalIsStillPending() external whenTheOwnerCancelsDuringGracePeriod {
+    function test_GivenDelayHasNotPassed() external whenExecutingAProposalAfterDelay {
         // Setup: Create a proposal
         uint256 startTime = block.timestamp;
         _createProposal(TEST_CALLDATA, TEST_NONCE);
 
-        // Fast forward to grace period (past delay, but before validUntil)
-        vm.warp(startTime + DELAY + 1);
+        // Get timing info
+        (, uint256 validAfter, uint256 validUntil) =
+            timelockPolicy.getProposal(WALLET, TEST_CALLDATA, TEST_NONCE, policyId, WALLET);
+
+        // Warp halfway through delay (not past validAfter)
+        vm.warp(startTime + DELAY / 2);
+
+        // Verify we haven't passed validAfter
+        assertTrue(block.timestamp < validAfter, "Should be before validAfter");
+
+        // Action: Try to execute
+        PackedUserOperation memory userOp = _createUserOp(TEST_CALLDATA, TEST_NONCE);
+        vm.prank(WALLET);
+        uint256 validationResult = timelockPolicy.checkUserOpPolicy(policyId, userOp);
+
+        // Verify: validation returns packed data (not failure) but validAfter is in the future
+        assertFalse(validationResult == 1, "Should not return failure");
+
+        uint48 returnedValidAfter = _extractValidAfter(validationResult);
+        assertTrue(block.timestamp < returnedValidAfter, "Should be before validAfter for bundler rejection");
+    }
+
+    // ==================== whenTheOwnerCancelsDuringDelayPeriod ====================
+
+    modifier whenTheOwnerCancelsDuringDelayPeriod() {
+        _;
+    }
+
+    function test_GivenTheProposalIsStillPending() external whenTheOwnerCancelsDuringDelayPeriod {
+        // Setup: Create a proposal
+        uint256 startTime = block.timestamp;
+        _createProposal(TEST_CALLDATA, TEST_NONCE);
+
+        // Fast forward into delay period (before validAfter)
+        vm.warp(startTime + DELAY / 2);
 
         // Verify proposal is still pending
-        (TimelockPolicy.ProposalStatus statusBefore,,,) =
+        (TimelockPolicy.ProposalStatus statusBefore,,) =
             timelockPolicy.getProposal(WALLET, TEST_CALLDATA, TEST_NONCE, policyId, WALLET);
-        assertEq(uint256(statusBefore), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should still be pending");
+        assertEq(
+            uint256(statusBefore), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should still be pending"
+        );
 
-        // Action: Owner cancels during grace period
+        // Action: Owner cancels during delay period
         _cancelProposal(TEST_CALLDATA, TEST_NONCE);
 
         // Verify: it should successfully cancel the proposal
-        (TimelockPolicy.ProposalStatus statusAfter,,,) =
+        (TimelockPolicy.ProposalStatus statusAfter,,) =
             timelockPolicy.getProposal(WALLET, TEST_CALLDATA, TEST_NONCE, policyId, WALLET);
         assertEq(uint256(statusAfter), uint256(TimelockPolicy.ProposalStatus.Cancelled), "Proposal should be cancelled");
     }
 
-    function test_GivenAnExecutionAttemptIsPendingInTheMempool() external whenTheOwnerCancelsDuringGracePeriod {
+    function test_GivenAnExecutionAttemptIsPendingInTheMempool() external whenTheOwnerCancelsDuringDelayPeriod {
         // Setup: Create a proposal
         uint256 startTime = block.timestamp;
         _createProposal(TEST_CALLDATA, TEST_NONCE);
 
-        // Fast forward to grace period
+        // Fast forward past delay
         vm.warp(startTime + DELAY + 1);
 
         // Simulate scenario where both cancellation and execution happen in same block
@@ -401,7 +394,7 @@ contract TimelockCancellationRaceTest is Test {
         assertEq(validationResult, 1, "Execution should fail because cancellation won the race");
 
         // Verify proposal remains cancelled
-        (TimelockPolicy.ProposalStatus status,,,) =
+        (TimelockPolicy.ProposalStatus status,,) =
             timelockPolicy.getProposal(WALLET, TEST_CALLDATA, TEST_NONCE, policyId, WALLET);
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Cancelled), "Proposal should remain cancelled");
     }
@@ -441,23 +434,24 @@ contract TimelockCancellationRaceTest is Test {
         vm.stopPrank();
     }
 
-    // ==================== whenCreatingANewProposalAfterGracePeriod ====================
+    // ==================== whenCreatingANewProposalAfterExpiration ====================
 
-    modifier whenCreatingANewProposalAfterGracePeriod() {
+    modifier whenCreatingANewProposalAfterExpiration() {
         _;
     }
 
-    function test_GivenTheOriginalProposalWasCancelled() external whenCreatingANewProposalAfterGracePeriod {
+    function test_GivenTheOriginalProposalWasCancelled() external whenCreatingANewProposalAfterExpiration {
         // Setup: Create and cancel a proposal
         _createProposal(TEST_CALLDATA, TEST_NONCE);
         _cancelProposal(TEST_CALLDATA, TEST_NONCE);
 
-        // Fast forward past when grace period would have ended
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + EXPIRATION_PERIOD + 1);
+        // Fast forward past when the proposal would have expired
+        vm.warp(block.timestamp + DELAY + EXPIRATION_PERIOD + 1);
 
         // Action & Verify: Attempting to create via no-op UserOp returns SIG_VALIDATION_FAILED
         // because cancelled proposals persist in storage
-        bytes memory sig = abi.encodePacked(bytes32(TEST_CALLDATA.length), TEST_CALLDATA, bytes32(TEST_NONCE), bytes1(0x00));
+        bytes memory sig =
+            abi.encodePacked(bytes32(TEST_CALLDATA.length), TEST_CALLDATA, bytes32(TEST_NONCE), bytes1(0x00));
         PackedUserOperation memory noopOp = PackedUserOperation({
             sender: WALLET,
             nonce: 0,
@@ -474,12 +468,12 @@ contract TimelockCancellationRaceTest is Test {
         assertEq(result, 1, "Should return SIG_VALIDATION_FAILED because cancelled proposals persist");
     }
 
-    function test_GivenTheOriginalProposalWasExecuted() external whenCreatingANewProposalAfterGracePeriod {
+    function test_GivenTheOriginalProposalWasExecuted() external whenCreatingANewProposalAfterExpiration {
         // Setup: Create a proposal
         _createProposal(TEST_CALLDATA, TEST_NONCE);
 
-        // Fast forward past delay and grace period
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        // Fast forward past delay
+        vm.warp(block.timestamp + DELAY + 1);
 
         // Execute the proposal
         PackedUserOperation memory userOp = _createUserOp(TEST_CALLDATA, TEST_NONCE);
@@ -491,7 +485,8 @@ contract TimelockCancellationRaceTest is Test {
 
         // Action & Verify: Attempting to create via no-op UserOp returns SIG_VALIDATION_FAILED
         // because executed proposals persist in storage
-        bytes memory sig = abi.encodePacked(bytes32(TEST_CALLDATA.length), TEST_CALLDATA, bytes32(TEST_NONCE), bytes1(0x00));
+        bytes memory sig =
+            abi.encodePacked(bytes32(TEST_CALLDATA.length), TEST_CALLDATA, bytes32(TEST_NONCE), bytes1(0x00));
         PackedUserOperation memory noopOp = PackedUserOperation({
             sender: WALLET,
             nonce: 0,
@@ -508,13 +503,13 @@ contract TimelockCancellationRaceTest is Test {
         assertEq(result, 1, "Should return SIG_VALIDATION_FAILED because executed proposals persist");
     }
 
-    // ==================== whenValidatingGracePeriodTiming ====================
+    // ==================== whenValidatingProposalTiming ====================
 
-    modifier whenValidatingGracePeriodTiming() {
+    modifier whenValidatingProposalTiming() {
         _;
     }
 
-    function test_GivenDelayIs1DayAndGracePeriodIs1Hour() external whenValidatingGracePeriodTiming {
+    function test_GivenDelayIs1DayAndExpirationIs1Day() external whenValidatingProposalTiming {
         // Setup: Record start time
         uint256 startTime = block.timestamp;
 
@@ -522,26 +517,26 @@ contract TimelockCancellationRaceTest is Test {
         _createProposal(TEST_CALLDATA, TEST_NONCE);
 
         // Get proposal timing
-        (TimelockPolicy.ProposalStatus status, uint256 validAfter,, uint256 validUntil) =
+        (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 validUntil) =
             timelockPolicy.getProposal(WALLET, TEST_CALLDATA, TEST_NONCE, policyId, WALLET);
 
         // Verify: it should set validAfter to current time plus delay
         assertEq(validAfter, startTime + DELAY, "validAfter should be startTime + delay");
 
-        // Verify: it should set validUntil correctly (validAfter + grace + expiration)
-        assertEq(validUntil, validAfter + GRACE_PERIOD + EXPIRATION_PERIOD, "validUntil should be validAfter + gracePeriod + expirationPeriod");
+        // Verify: it should set validUntil correctly (validAfter + expirationPeriod)
+        assertEq(validUntil, validAfter + EXPIRATION_PERIOD, "validUntil should be validAfter + expirationPeriod");
     }
 
-    function test_GivenExecutionValidationDataIsReturned() external whenValidatingGracePeriodTiming {
+    function test_GivenExecutionValidationDataIsReturned() external whenValidatingProposalTiming {
         // Setup: Create a proposal
         uint256 startTime = block.timestamp;
         _createProposal(TEST_CALLDATA, TEST_NONCE);
 
-        // Get expected timing - note: packed validAfter uses graceEnd, not validAfter
-        (,uint256 expectedValidAfter, uint256 expectedGraceEnd, uint256 expectedValidUntil) =
+        // Get expected timing
+        (, uint256 expectedValidAfter, uint256 expectedValidUntil) =
             timelockPolicy.getProposal(WALLET, TEST_CALLDATA, TEST_NONCE, policyId, WALLET);
 
-        // Fast forward just past delay but still in grace period
+        // Fast forward past delay
         vm.warp(startTime + DELAY + 1);
 
         // Action: Get validation data by calling checkUserOpPolicy
@@ -553,8 +548,8 @@ contract TimelockCancellationRaceTest is Test {
         uint48 packedValidAfter = _extractValidAfter(validationResult);
         uint48 packedValidUntil = _extractValidUntil(validationResult);
 
-        // Verify: it should pack graceEnd as validAfter (execution allowed after grace period)
-        assertEq(packedValidAfter, uint48(expectedGraceEnd), "Packed validAfter should match proposal graceEnd");
+        // Verify: it should pack validAfter from the proposal
+        assertEq(packedValidAfter, uint48(expectedValidAfter), "Packed validAfter should match proposal validAfter");
 
         // Verify: it should pack validUntil as expiration time
         assertEq(packedValidUntil, uint48(expectedValidUntil), "Packed validUntil should match proposal expiration");
@@ -567,7 +562,7 @@ contract TimelockCancellationRaceTest is Test {
         _createProposal(TEST_CALLDATA, TEST_NONCE);
 
         // Fast forward past expiration
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + EXPIRATION_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + EXPIRATION_PERIOD + 1);
 
         // Action: Try to execute
         PackedUserOperation memory userOp = _createUserOp(TEST_CALLDATA, TEST_NONCE);
@@ -593,7 +588,8 @@ contract TimelockCancellationRaceTest is Test {
         address nonInitializedAccount = address(0xDEAD);
 
         // Try to create proposal via no-op UserOp on non-initialized account
-        bytes memory sig = abi.encodePacked(bytes32(TEST_CALLDATA.length), TEST_CALLDATA, bytes32(TEST_NONCE), bytes1(0x00));
+        bytes memory sig =
+            abi.encodePacked(bytes32(TEST_CALLDATA.length), TEST_CALLDATA, bytes32(TEST_NONCE), bytes1(0x00));
         PackedUserOperation memory noopOp = PackedUserOperation({
             sender: nonInitializedAccount,
             nonce: 0,
