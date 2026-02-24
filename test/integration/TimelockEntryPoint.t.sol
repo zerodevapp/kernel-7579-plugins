@@ -6,6 +6,7 @@ import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 import {IAccountExecute} from "account-abstraction/interfaces/IAccountExecute.sol";
 import {IERC7579Execution} from "openzeppelin-contracts/contracts/interfaces/draft-IERC7579.sol";
+import {LibERC7579} from "solady/accounts/LibERC7579.sol";
 import {EntryPointLib} from "../utils/EntryPointLib.sol";
 import {MockTimelockAccount} from "../utils/MockTimelockAccount.sol";
 import {TimelockPolicy} from "../../src/policies/TimelockPolicy.sol";
@@ -22,7 +23,7 @@ contract TimelockEntryPointTest is Test {
     bytes32 public constant POLICY_ID = bytes32(uint256(1));
     uint48 public constant DELAY = 1 hours;
     uint48 public constant EXPIRATION = 1 days;
-    uint48 public constant GRACE_PERIOD = 30 minutes;
+    address public constant GUARDIAN = address(0);
 
     address payable constant BENEFICIARY = payable(address(0xbeeF));
     address constant BUNDLER = address(0xba5ed);
@@ -37,23 +38,15 @@ contract TimelockEntryPointTest is Test {
 
         // Install timelock policy (must come from the account)
         vm.prank(address(account));
-        policy.onInstall(abi.encode(POLICY_ID, DELAY, EXPIRATION, GRACE_PERIOD));
+        policy.onInstall(abi.encode(POLICY_ID, DELAY, EXPIRATION, GUARDIAN));
     }
 
     // ============ Helpers ============
 
     /// @dev Build proposal-creation signature: [callDataLen(32)][callData][proposalNonce(32)][0x00]
-    function _proposalSig(bytes memory proposalCallData, uint256 proposalNonce)
-        internal
-        pure
-        returns (bytes memory)
-    {
-        return abi.encodePacked(
-            bytes32(proposalCallData.length),
-            proposalCallData,
-            bytes32(proposalNonce),
-            bytes1(0x00)
-        );
+    function _proposalSig(bytes memory proposalCallData, uint256 proposalNonce) internal pure returns (bytes memory) {
+        return
+            abi.encodePacked(bytes32(proposalCallData.length), proposalCallData, bytes32(proposalNonce), bytes1(0x00));
     }
 
     /// @dev Build a no-op UserOp for proposal creation with configurable calldata format.
@@ -149,13 +142,12 @@ contract TimelockEntryPointTest is Test {
         _submitOp(_buildCreationOp(proposalCallData, proposalNonce, epNonce));
 
         // Verify proposal was stored
-        (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 graceEnd, uint256 validUntil) =
+        (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 validUntil) =
             policy.getProposal(address(account), proposalCallData, proposalNonce, POLICY_ID, address(account));
 
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending));
         assertEq(validAfter, block.timestamp + DELAY);
-        assertEq(graceEnd, block.timestamp + DELAY + GRACE_PERIOD);
-        assertEq(validUntil, block.timestamp + DELAY + GRACE_PERIOD + EXPIRATION);
+        assertEq(validUntil, block.timestamp + DELAY + EXPIRATION);
 
         // EntryPoint nonce should have advanced
         assertEq(_getNonce(0), 1);
@@ -170,7 +162,7 @@ contract TimelockEntryPointTest is Test {
         _submitOp(_buildCreationOp(proposalCallData, proposalNonce, 0));
 
         // Step 2: Warp past delay + grace period
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + 1);
 
         // Step 3: Execute proposal through EntryPoint
         _submitOp(_buildExecutionOp(proposalCallData, proposalNonce));
@@ -179,7 +171,7 @@ contract TimelockEntryPointTest is Test {
         assertEq(account.value(), 42);
 
         // Verify proposal status is Executed
-        (TimelockPolicy.ProposalStatus status,,,) =
+        (TimelockPolicy.ProposalStatus status,,) =
             policy.getProposal(address(account), proposalCallData, proposalNonce, POLICY_ID, address(account));
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Executed));
     }
@@ -193,44 +185,44 @@ contract TimelockEntryPointTest is Test {
 
     // ============ 2. Time Window Enforcement ============
 
-    /// @notice EntryPoint rejects execution during the grace period (validAfter not yet reached).
-    function testEntryPoint_GracePeriodBlocksExecution() public {
+    /// @notice EntryPoint rejects execution before the delay has passed (validAfter not yet reached).
+    function testEntryPoint_DelayBlocksExecution() public {
         bytes memory proposalCallData = abi.encodeCall(MockTimelockAccount.setValue, (42));
         uint256 proposalNonce = 1;
 
         _submitOp(_buildCreationOp(proposalCallData, proposalNonce, 0));
 
-        // Warp past delay but still within grace period
-        vm.warp(block.timestamp + DELAY + 1);
+        // Warp halfway through delay — still blocked
+        vm.warp(block.timestamp + DELAY / 2);
 
         _expectRevertOnOp(_buildExecutionOp(proposalCallData, proposalNonce));
         assertEq(account.value(), 0);
     }
 
-    /// @notice Execution at exactly graceEnd timestamp is still rejected (EntryPoint uses <=).
-    function testEntryPoint_ExecutionAtExactGraceEndIsRejected() public {
+    /// @notice Execution at exactly validAfter timestamp is still rejected (EntryPoint uses <=).
+    function testEntryPoint_ExecutionAtExactValidAfterIsRejected() public {
         bytes memory proposalCallData = abi.encodeCall(MockTimelockAccount.setValue, (42));
         uint256 proposalNonce = 1;
 
         uint256 creationTime = block.timestamp;
         _submitOp(_buildCreationOp(proposalCallData, proposalNonce, 0));
 
-        // Warp to exactly graceEnd: EntryPoint checks block.timestamp <= validAfter, so equal is rejected
-        vm.warp(creationTime + DELAY + GRACE_PERIOD);
+        // Warp to exactly validAfter: EntryPoint checks block.timestamp <= validAfter, so equal is rejected
+        vm.warp(creationTime + DELAY);
 
         _expectRevertOnOp(_buildExecutionOp(proposalCallData, proposalNonce));
         assertEq(account.value(), 0);
     }
 
-    /// @notice Execution at graceEnd + 1 succeeds (first valid timestamp).
-    function testEntryPoint_ExecutionAtGraceEndPlusOneSucceeds() public {
+    /// @notice Execution at validAfter + 1 succeeds (first valid timestamp).
+    function testEntryPoint_ExecutionAtValidAfterPlusOneSucceeds() public {
         bytes memory proposalCallData = abi.encodeCall(MockTimelockAccount.setValue, (42));
         uint256 proposalNonce = 1;
 
         uint256 creationTime = block.timestamp;
         _submitOp(_buildCreationOp(proposalCallData, proposalNonce, 0));
 
-        vm.warp(creationTime + DELAY + GRACE_PERIOD + 1);
+        vm.warp(creationTime + DELAY + 1);
 
         _submitOp(_buildExecutionOp(proposalCallData, proposalNonce));
         assertEq(account.value(), 42);
@@ -245,7 +237,7 @@ contract TimelockEntryPointTest is Test {
         _submitOp(_buildCreationOp(proposalCallData, proposalNonce, 0));
 
         // Warp to exactly validUntil: EntryPoint checks block.timestamp > validUntil, so equal is OK
-        vm.warp(creationTime + DELAY + GRACE_PERIOD + EXPIRATION);
+        vm.warp(creationTime + DELAY + EXPIRATION);
 
         _submitOp(_buildExecutionOp(proposalCallData, proposalNonce));
         assertEq(account.value(), 42);
@@ -260,7 +252,7 @@ contract TimelockEntryPointTest is Test {
         _submitOp(_buildCreationOp(proposalCallData, proposalNonce, 0));
 
         // Warp 1 second past validUntil
-        vm.warp(creationTime + DELAY + GRACE_PERIOD + EXPIRATION + 1);
+        vm.warp(creationTime + DELAY + EXPIRATION + 1);
 
         _expectRevertOnOp(_buildExecutionOp(proposalCallData, proposalNonce));
         assertEq(account.value(), 0);
@@ -290,32 +282,32 @@ contract TimelockEntryPointTest is Test {
         vm.prank(address(account));
         policy.cancelProposal(POLICY_ID, address(account), proposalCallData, proposalNonce);
 
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + 1);
 
         _expectRevertOnOp(_buildExecutionOp(proposalCallData, proposalNonce));
         assertEq(account.value(), 0);
     }
 
-    /// @notice Owner can cancel during grace period (delay passed but grace hasn't ended).
-    function testEntryPoint_CancelDuringGracePeriod() public {
+    /// @notice Owner can cancel during delay period (before validAfter).
+    function testEntryPoint_CancelDuringDelayPeriod() public {
         bytes memory proposalCallData = abi.encodeCall(MockTimelockAccount.setValue, (42));
         uint256 proposalNonce = 1;
 
         _submitOp(_buildCreationOp(proposalCallData, proposalNonce, 0));
 
-        // Warp into the grace period
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD / 2);
+        // Warp into the delay period
+        vm.warp(block.timestamp + DELAY / 2);
 
         // Cancel should succeed
         vm.prank(address(account));
         policy.cancelProposal(POLICY_ID, address(account), proposalCallData, proposalNonce);
 
-        (TimelockPolicy.ProposalStatus status,,,) =
+        (TimelockPolicy.ProposalStatus status,,) =
             policy.getProposal(address(account), proposalCallData, proposalNonce, POLICY_ID, address(account));
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Cancelled));
 
-        // Warp past grace period — execution still fails
-        vm.warp(block.timestamp + GRACE_PERIOD + 1);
+        // Warp past delay — execution still fails (cancelled)
+        vm.warp(block.timestamp + DELAY + 1);
         _expectRevertOnOp(_buildExecutionOp(proposalCallData, proposalNonce));
     }
 
@@ -330,7 +322,7 @@ contract TimelockEntryPointTest is Test {
         vm.prank(address(account));
         policy.cancelProposal(POLICY_ID, address(account), proposalCallData, proposalNonce);
 
-        (TimelockPolicy.ProposalStatus status,,,) =
+        (TimelockPolicy.ProposalStatus status,,) =
             policy.getProposal(address(account), proposalCallData, proposalNonce, POLICY_ID, address(account));
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Cancelled));
     }
@@ -345,7 +337,7 @@ contract TimelockEntryPointTest is Test {
 
         _createProposal(proposalCallData, proposalNonce);
 
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + 1);
 
         // First execution succeeds
         _submitOp(_buildExecutionOp(proposalCallData, proposalNonce));
@@ -357,7 +349,7 @@ contract TimelockEntryPointTest is Test {
         // We use key=2 to get a fresh nonce that equals proposalNonce... but that doesn't
         // match the original proposalNonce. The proposal key won't match.
         // Instead, verify the proposal status is Executed.
-        (TimelockPolicy.ProposalStatus status,,,) =
+        (TimelockPolicy.ProposalStatus status,,) =
             policy.getProposal(address(account), proposalCallData, proposalNonce, POLICY_ID, address(account));
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Executed));
     }
@@ -391,10 +383,10 @@ contract TimelockEntryPointTest is Test {
 
         // Reinstall (increments epoch)
         vm.prank(address(account));
-        policy.onInstall(abi.encode(POLICY_ID, DELAY, EXPIRATION, GRACE_PERIOD));
+        policy.onInstall(abi.encode(POLICY_ID, DELAY, EXPIRATION, GUARDIAN));
 
         // Warp past delay + grace
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + 1);
 
         // Execution fails: proposal epoch doesn't match new epoch
         _expectRevertOnOp(_buildExecutionOp(proposalCallData, proposalNonce));
@@ -413,13 +405,13 @@ contract TimelockEntryPointTest is Test {
         vm.prank(address(account));
         policy.onUninstall(abi.encode(POLICY_ID, ""));
         vm.prank(address(account));
-        policy.onInstall(abi.encode(POLICY_ID, DELAY, EXPIRATION, GRACE_PERIOD));
+        policy.onInstall(abi.encode(POLICY_ID, DELAY, EXPIRATION, GUARDIAN));
 
         // Create a NEW proposal with a different nonce
         uint256 newProposalNonce = _getNonce(2); // key=2
         _createProposal(abi.encodeCall(MockTimelockAccount.setValue, (77)), newProposalNonce);
 
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + 1);
 
         // New proposal executes fine
         _submitOp(_buildExecutionOp(abi.encodeCall(MockTimelockAccount.setValue, (77)), newProposalNonce));
@@ -428,22 +420,27 @@ contract TimelockEntryPointTest is Test {
 
     // ============ 6. No-Op Calldata Variants ============
 
-    /// @notice Proposal creation with ERC-7579 execute(mode=0x00, "") no-op format.
+    /// @notice Proposal creation with ERC-7579 execute(CALLTYPE_SINGLE, abi.encodePacked(target, 0)) no-op format.
+    ///         Uses the minimal decodeSingle()-compatible execution data (52 bytes).
     function testEntryPoint_CreationViaERC7579NoOp() public {
         bytes memory proposalCallData = abi.encodeCall(MockTimelockAccount.setValue, (42));
         uint256 proposalNonce = _getNonce(1);
 
-        // ERC-7579 no-op: execute(bytes32(0), "") → selector + mode(32) + offset(32) + len(32) = 100 bytes
-        bytes memory erc7579Noop = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "");
+        // ERC-7579 no-op: execute(singleMode, abi.encodePacked(target, uint256(0)))
+        // executionCalldata = target(20) + value(32) = 52 bytes, no inner calldata
+        bytes32 mode =
+            LibERC7579.encodeMode(LibERC7579.CALLTYPE_SINGLE, LibERC7579.EXECTYPE_DEFAULT, bytes4(0), bytes22(0));
+        bytes memory erc7579Noop =
+            abi.encodeWithSelector(IERC7579Execution.execute.selector, mode, abi.encodePacked(address(0), uint256(0)));
 
         _submitOp(_buildCreationOpWithCalldata(erc7579Noop, proposalCallData, proposalNonce, _getNonce(0)));
 
-        (TimelockPolicy.ProposalStatus status,,,) =
+        (TimelockPolicy.ProposalStatus status,,) =
             policy.getProposal(address(account), proposalCallData, proposalNonce, POLICY_ID, address(account));
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending));
 
         // Verify lifecycle completes
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + 1);
         _submitOp(_buildExecutionOp(proposalCallData, proposalNonce));
         assertEq(account.value(), 42);
     }
@@ -458,7 +455,7 @@ contract TimelockEntryPointTest is Test {
 
         _submitOp(_buildCreationOpWithCalldata(executeUserOpNoop, proposalCallData, proposalNonce, _getNonce(0)));
 
-        (TimelockPolicy.ProposalStatus status,,,) =
+        (TimelockPolicy.ProposalStatus status,,) =
             policy.getProposal(address(account), proposalCallData, proposalNonce, POLICY_ID, address(account));
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending));
     }
@@ -468,12 +465,15 @@ contract TimelockEntryPointTest is Test {
         bytes memory proposalCallData = abi.encodeCall(MockTimelockAccount.setValue, (42));
         uint256 proposalNonce = _getNonce(1);
 
-        bytes memory erc7579Noop = abi.encodeWithSelector(IERC7579Execution.execute.selector, bytes32(0), "");
+        bytes32 mode =
+            LibERC7579.encodeMode(LibERC7579.CALLTYPE_SINGLE, LibERC7579.EXECTYPE_DEFAULT, bytes4(0), bytes22(0));
+        bytes memory erc7579Noop =
+            abi.encodeWithSelector(IERC7579Execution.execute.selector, mode, abi.encodePacked(address(0), uint256(0)));
         bytes memory wrappedNoop = abi.encodePacked(IAccountExecute.executeUserOp.selector, erc7579Noop);
 
         _submitOp(_buildCreationOpWithCalldata(wrappedNoop, proposalCallData, proposalNonce, _getNonce(0)));
 
-        (TimelockPolicy.ProposalStatus status,,,) =
+        (TimelockPolicy.ProposalStatus status,,) =
             policy.getProposal(address(account), proposalCallData, proposalNonce, POLICY_ID, address(account));
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending));
     }
@@ -493,7 +493,7 @@ contract TimelockEntryPointTest is Test {
         _createProposal(callDataA, nonceA);
         _createProposal(callDataB, nonceB);
 
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + 1);
 
         // Execute B first
         _submitOp(_buildExecutionOp(callDataB, nonceB));
@@ -504,9 +504,9 @@ contract TimelockEntryPointTest is Test {
         assertEq(account.value(), 10);
 
         // Both are Executed
-        (TimelockPolicy.ProposalStatus statusA,,,) =
+        (TimelockPolicy.ProposalStatus statusA,,) =
             policy.getProposal(address(account), callDataA, nonceA, POLICY_ID, address(account));
-        (TimelockPolicy.ProposalStatus statusB,,,) =
+        (TimelockPolicy.ProposalStatus statusB,,) =
             policy.getProposal(address(account), callDataB, nonceB, POLICY_ID, address(account));
         assertEq(uint256(statusA), uint256(TimelockPolicy.ProposalStatus.Executed));
         assertEq(uint256(statusB), uint256(TimelockPolicy.ProposalStatus.Executed));
@@ -527,7 +527,7 @@ contract TimelockEntryPointTest is Test {
         vm.prank(address(account));
         policy.cancelProposal(POLICY_ID, address(account), callDataA, nonceA);
 
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + 1);
 
         // A fails
         _expectRevertOnOp(_buildExecutionOp(callDataA, nonceA));
@@ -554,30 +554,30 @@ contract TimelockEntryPointTest is Test {
 
         // Create A at T0
         _createProposal(callDataA, nonceA);
-        // A's graceEnd = T0 + DELAY + GRACE_PERIOD = 10000 + 3600 + 1800 = 15400
-        // A's validUntil = 15400 + EXPIRATION = 15400 + 86400 = 101800
+        // A's validAfter = T0 + DELAY = 10000 + 3600 = 13600
+        // A's validUntil = 13600 + EXPIRATION = 13600 + 86400 = 100000
 
         // Warp 1 hour, create B at T0 + 1h
         uint256 T1 = T0 + 1 hours; // 13600
         vm.warp(T1);
         _createProposal(callDataB, nonceB);
-        // B's graceEnd = T1 + DELAY + GRACE_PERIOD = 13600 + 3600 + 1800 = 19000
-        // B's validUntil = 19000 + EXPIRATION = 19000 + 86400 = 105400
+        // B's validAfter = T1 + DELAY = 13600 + 3600 = 17200
+        // B's validUntil = 17200 + EXPIRATION = 17200 + 86400 = 103600
 
-        // Warp to T0 + DELAY + GRACE_PERIOD + 1 = 15401
-        // A's graceEnd (15400) < 15401 → A is executable
-        // B's graceEnd (19000) > 15401 → B still in grace
-        vm.warp(T0 + uint256(DELAY) + uint256(GRACE_PERIOD) + 1);
+        // Warp to T0 + DELAY + 1 = 13601
+        // A's validAfter (13600) < 13601 → A is executable
+        // B's validAfter (17200) > 13601 → B still in delay
+        vm.warp(T0 + uint256(DELAY) + 1);
 
         // A works
         _submitOp(_buildExecutionOp(callDataA, nonceA));
         assertEq(account.value(), 10);
 
-        // B still blocked (B's graceEnd = 19000 > 15401)
+        // B still blocked (B's validAfter = 17200 > 13601)
         _expectRevertOnOp(_buildExecutionOp(callDataB, nonceB));
 
-        // Warp to B's window: T1 + DELAY + GRACE_PERIOD + 1 = 19001
-        vm.warp(T1 + uint256(DELAY) + uint256(GRACE_PERIOD) + 1);
+        // Warp to B's window: T1 + DELAY + 1 = 17201
+        vm.warp(T1 + uint256(DELAY) + 1);
         _submitOp(_buildExecutionOp(callDataB, nonceB));
         assertEq(account.value(), 20);
     }
@@ -600,9 +600,9 @@ contract TimelockEntryPointTest is Test {
         _submitOps(ops);
 
         // Both proposals should exist
-        (TimelockPolicy.ProposalStatus statusA,,,) =
+        (TimelockPolicy.ProposalStatus statusA,,) =
             policy.getProposal(address(account), callDataA, nonceA, POLICY_ID, address(account));
-        (TimelockPolicy.ProposalStatus statusB,,,) =
+        (TimelockPolicy.ProposalStatus statusB,,) =
             policy.getProposal(address(account), callDataB, nonceB, POLICY_ID, address(account));
         assertEq(uint256(statusA), uint256(TimelockPolicy.ProposalStatus.Pending));
         assertEq(uint256(statusB), uint256(TimelockPolicy.ProposalStatus.Pending));
@@ -619,7 +619,7 @@ contract TimelockEntryPointTest is Test {
         _createProposal(callDataA, nonceA);
         _createProposal(callDataB, nonceB);
 
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + 1);
 
         PackedUserOperation[] memory ops = new PackedUserOperation[](2);
         ops[0] = _buildExecutionOp(callDataA, nonceA);
@@ -630,9 +630,9 @@ contract TimelockEntryPointTest is Test {
         // Last one wins for the value, both should be Executed
         assertEq(account.value(), 20);
 
-        (TimelockPolicy.ProposalStatus statusA,,,) =
+        (TimelockPolicy.ProposalStatus statusA,,) =
             policy.getProposal(address(account), callDataA, nonceA, POLICY_ID, address(account));
-        (TimelockPolicy.ProposalStatus statusB,,,) =
+        (TimelockPolicy.ProposalStatus statusB,,) =
             policy.getProposal(address(account), callDataB, nonceB, POLICY_ID, address(account));
         assertEq(uint256(statusA), uint256(TimelockPolicy.ProposalStatus.Executed));
         assertEq(uint256(statusB), uint256(TimelockPolicy.ProposalStatus.Executed));
@@ -650,7 +650,7 @@ contract TimelockEntryPointTest is Test {
         // Create using key=0
         _submitOp(_buildCreationOp(proposalCallData, proposalNonce, _getNonce(0)));
 
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + 1);
 
         // Execute using key=5 (nonce matches proposalNonce)
         _submitOp(_buildExecutionOp(proposalCallData, proposalNonce));
@@ -665,7 +665,7 @@ contract TimelockEntryPointTest is Test {
         MockTimelockAccount account2 = new MockTimelockAccount(entryPoint, policy, POLICY_ID);
         vm.deal(address(account2), 10 ether);
         vm.prank(address(account2));
-        policy.onInstall(abi.encode(POLICY_ID, DELAY, EXPIRATION, GRACE_PERIOD));
+        policy.onInstall(abi.encode(POLICY_ID, DELAY, EXPIRATION, GUARDIAN));
 
         bytes memory proposalCallData = abi.encodeCall(MockTimelockAccount.setValue, (42));
         uint256 proposalNonce1 = entryPoint.getNonce(address(account), 1);
@@ -688,7 +688,7 @@ contract TimelockEntryPointTest is Test {
         });
         _submitOp(op2);
 
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + 1);
 
         // Execute account 1
         _submitOp(_buildExecutionOp(proposalCallData, proposalNonce1));
@@ -721,7 +721,7 @@ contract TimelockEntryPointTest is Test {
         // sig = [len=0 (32 bytes)] + [nonce (32 bytes)] + [0x00 (1 byte)] = 65 bytes total ✓
         _createProposal(proposalCallData, proposalNonce);
 
-        (TimelockPolicy.ProposalStatus status,,,) =
+        (TimelockPolicy.ProposalStatus status,,) =
             policy.getProposal(address(account), proposalCallData, proposalNonce, POLICY_ID, address(account));
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending));
     }
@@ -737,7 +737,7 @@ contract TimelockEntryPointTest is Test {
 
         _createProposal(largeCallData, proposalNonce);
 
-        (TimelockPolicy.ProposalStatus status,,,) =
+        (TimelockPolicy.ProposalStatus status,,) =
             policy.getProposal(address(account), largeCallData, proposalNonce, POLICY_ID, address(account));
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending));
     }
@@ -751,7 +751,7 @@ contract TimelockEntryPointTest is Test {
 
         bytes32 expectedKey = policy.computeUserOpKey(address(account), proposalCallData, proposalNonce);
         uint256 expectedValidAfter = block.timestamp + DELAY;
-        uint256 expectedValidUntil = block.timestamp + DELAY + GRACE_PERIOD + EXPIRATION;
+        uint256 expectedValidUntil = block.timestamp + DELAY + EXPIRATION;
 
         vm.expectEmit(true, true, true, true);
         emit TimelockPolicy.ProposalCreated(
@@ -768,7 +768,7 @@ contract TimelockEntryPointTest is Test {
 
         _createProposal(proposalCallData, proposalNonce);
 
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + 1);
 
         bytes32 expectedKey = policy.computeUserOpKey(address(account), proposalCallData, proposalNonce);
 
@@ -797,7 +797,7 @@ contract TimelockEntryPointTest is Test {
         _submitOp(_buildCreationOp(cd2, pNonce2, 1));
         assertEq(_getNonce(0), 2);
 
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + 1);
 
         // Op 3: execution of first proposal (key=1)
         _submitOp(_buildExecutionOp(cd, pNonce));
@@ -839,34 +839,25 @@ contract TimelockEntryPointTest is Test {
         assertTrue(BENEFICIARY.balance > balBefore);
     }
 
-    // ============ 15. Full Grace Period Race-Condition Scenario ============
+    // ============ 15. Guardian Cancellation Scenario ============
 
-    /// @notice Simulate the race condition the grace period is designed to prevent:
+    /// @notice Simulate the guardian cancellation scenario:
     ///         1. Session key creates proposal
-    ///         2. Delay passes, session key submits execution
-    ///         3. Owner sees it and cancels during grace period
-    ///         4. Execution fails because EntryPoint rejects (validAfter = graceEnd)
-    function testEntryPoint_GracePeriodRaceCondition() public {
+    ///         2. Guardian (or owner) cancels before delay passes
+    ///         3. Execution fails because proposal is cancelled
+    function testEntryPoint_GuardianCancellationScenario() public {
         bytes memory proposalCallData = abi.encodeCall(MockTimelockAccount.setValue, (999));
         uint256 proposalNonce = _getNonce(1);
 
         // Step 1: Session key creates proposal
         _createProposal(proposalCallData, proposalNonce);
 
-        // Step 2: Warp to delay + 1 second (within grace period)
-        vm.warp(block.timestamp + DELAY + 1);
-
-        // Step 3: Session key tries to execute but EntryPoint blocks it
-        //         (validAfter = graceEnd which is in the future)
-        _expectRevertOnOp(_buildExecutionOp(proposalCallData, proposalNonce));
-        assertEq(account.value(), 0);
-
-        // Step 4: Owner cancels during grace period
+        // Step 2: Owner cancels during delay period
         vm.prank(address(account));
         policy.cancelProposal(POLICY_ID, address(account), proposalCallData, proposalNonce);
 
-        // Step 5: Even after grace period, execution fails (cancelled)
-        vm.warp(block.timestamp + GRACE_PERIOD + 1);
+        // Step 3: Even after delay passes, execution fails (cancelled)
+        vm.warp(block.timestamp + DELAY + 1);
         _expectRevertOnOp(_buildExecutionOp(proposalCallData, proposalNonce));
         assertEq(account.value(), 0);
     }
@@ -918,19 +909,19 @@ contract TimelockEntryPointTest is Test {
         uint256 nonce2 = _getNonce(2);
         _createProposal(proposalCallData, nonce2);
 
-        (TimelockPolicy.ProposalStatus status,,,) =
+        (TimelockPolicy.ProposalStatus status,,) =
             policy.getProposal(address(account), proposalCallData, nonce2, POLICY_ID, address(account));
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending));
 
         // Execute the new proposal
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + 1);
         _submitOp(_buildExecutionOp(proposalCallData, nonce2));
         assertEq(account.value(), 42);
     }
 
     // ============ 19. Exact Boundary: Delay Not Passed ============
 
-    /// @notice At exactly delay (no grace period overlap), execution is still blocked.
+    /// @notice At exactly validAfter (= t0 + DELAY), execution is still blocked (EntryPoint uses <=).
     function testEntryPoint_AtExactDelayStillBlocked() public {
         bytes memory proposalCallData = abi.encodeCall(MockTimelockAccount.setValue, (42));
         uint256 proposalNonce = _getNonce(1);
@@ -938,8 +929,7 @@ contract TimelockEntryPointTest is Test {
         uint256 t0 = block.timestamp;
         _createProposal(proposalCallData, proposalNonce);
 
-        // At exactly validAfter (= t0 + DELAY): this is start of grace period, not end
-        // graceEnd = t0 + DELAY + GRACE_PERIOD, so block.timestamp <= graceEnd
+        // At exactly validAfter (= t0 + DELAY): EntryPoint checks block.timestamp <= validAfter
         vm.warp(t0 + DELAY);
         _expectRevertOnOp(_buildExecutionOp(proposalCallData, proposalNonce));
     }
@@ -957,14 +947,14 @@ contract TimelockEntryPointTest is Test {
         _createProposal(proposalCallData, nonceB);
 
         // Both exist
-        (TimelockPolicy.ProposalStatus statusA,,,) =
+        (TimelockPolicy.ProposalStatus statusA,,) =
             policy.getProposal(address(account), proposalCallData, nonceA, POLICY_ID, address(account));
-        (TimelockPolicy.ProposalStatus statusB,,,) =
+        (TimelockPolicy.ProposalStatus statusB,,) =
             policy.getProposal(address(account), proposalCallData, nonceB, POLICY_ID, address(account));
         assertEq(uint256(statusA), uint256(TimelockPolicy.ProposalStatus.Pending));
         assertEq(uint256(statusB), uint256(TimelockPolicy.ProposalStatus.Pending));
 
-        vm.warp(block.timestamp + DELAY + GRACE_PERIOD + 1);
+        vm.warp(block.timestamp + DELAY + 1);
 
         // Execute A, cancel B
         _submitOp(_buildExecutionOp(proposalCallData, nonceA));
@@ -973,9 +963,99 @@ contract TimelockEntryPointTest is Test {
         vm.prank(address(account));
         policy.cancelProposal(POLICY_ID, address(account), proposalCallData, nonceB);
 
-        (statusA,,,) = policy.getProposal(address(account), proposalCallData, nonceA, POLICY_ID, address(account));
-        (statusB,,,) = policy.getProposal(address(account), proposalCallData, nonceB, POLICY_ID, address(account));
+        (statusA,,) = policy.getProposal(address(account), proposalCallData, nonceA, POLICY_ID, address(account));
+        (statusB,,) = policy.getProposal(address(account), proposalCallData, nonceB, POLICY_ID, address(account));
         assertEq(uint256(statusA), uint256(TimelockPolicy.ProposalStatus.Executed));
         assertEq(uint256(statusB), uint256(TimelockPolicy.ProposalStatus.Cancelled));
+    }
+
+    // ============ 21. Guardian Cancel Direct Call Prevents EntryPoint Execution ============
+
+    /// @notice Guardian cancels proposal via direct call, then execution UserOp through EntryPoint fails
+    function testEntryPoint_GuardianDirectCancelBlocksEntryPointExecution() public {
+        // Setup: Create a new account with a real guardian
+        address guardian = makeAddr("guardian");
+        bytes32 guardianPolicyId = bytes32(uint256(100));
+
+        // Deploy new account and policy with guardian
+        MockTimelockAccount accountWithGuardian = new MockTimelockAccount(entryPoint, policy, guardianPolicyId);
+        vm.deal(address(accountWithGuardian), 100 ether);
+
+        // Install policy with guardian
+        vm.prank(address(accountWithGuardian));
+        policy.onInstall(abi.encode(guardianPolicyId, DELAY, EXPIRATION, guardian));
+
+        // Step 1: Create proposal via EntryPoint
+        bytes memory proposalCallData = abi.encodeCall(MockTimelockAccount.setValue, (777));
+        uint256 proposalNonce = entryPoint.getNonce(address(accountWithGuardian), 1); // key=1 for execution
+        uint256 creationNonce = entryPoint.getNonce(address(accountWithGuardian), 0); // key=0 for creation
+
+        PackedUserOperation memory creationOp = PackedUserOperation({
+            sender: address(accountWithGuardian),
+            nonce: creationNonce,
+            initCode: "",
+            callData: "", // no-op calldata
+            accountGasLimits: bytes32(abi.encodePacked(uint128(500_000), uint128(500_000))),
+            preVerificationGas: 100_000,
+            gasFees: bytes32(abi.encodePacked(uint128(1 gwei), uint128(1 gwei))),
+            paymasterAndData: "",
+            signature: _proposalSig(proposalCallData, proposalNonce)
+        });
+
+        PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+        ops[0] = creationOp;
+        vm.prank(BUNDLER, BUNDLER);
+        entryPoint.handleOps(ops, BENEFICIARY);
+
+        // Verify proposal was created
+        (TimelockPolicy.ProposalStatus statusBefore,,) = policy.getProposal(
+            address(accountWithGuardian),
+            proposalCallData,
+            proposalNonce,
+            guardianPolicyId,
+            address(accountWithGuardian)
+        );
+        assertEq(uint256(statusBefore), uint256(TimelockPolicy.ProposalStatus.Pending), "Proposal should be pending");
+
+        // Step 2: Guardian calls cancelProposal directly (not through EntryPoint)
+        vm.prank(guardian);
+        policy.cancelProposal(guardianPolicyId, address(accountWithGuardian), proposalCallData, proposalNonce);
+
+        // Verify proposal is cancelled
+        (TimelockPolicy.ProposalStatus statusAfterCancel,,) = policy.getProposal(
+            address(accountWithGuardian),
+            proposalCallData,
+            proposalNonce,
+            guardianPolicyId,
+            address(accountWithGuardian)
+        );
+        assertEq(
+            uint256(statusAfterCancel), uint256(TimelockPolicy.ProposalStatus.Cancelled), "Proposal should be cancelled"
+        );
+
+        // Step 3: Warp past delay and try to execute via EntryPoint — should fail
+        vm.warp(block.timestamp + DELAY + 1);
+
+        PackedUserOperation memory executionOp = PackedUserOperation({
+            sender: address(accountWithGuardian),
+            nonce: proposalNonce,
+            initCode: "",
+            callData: proposalCallData,
+            accountGasLimits: bytes32(abi.encodePacked(uint128(500_000), uint128(500_000))),
+            preVerificationGas: 100_000,
+            gasFees: bytes32(abi.encodePacked(uint128(1 gwei), uint128(1 gwei))),
+            paymasterAndData: "",
+            signature: "" // signature irrelevant for execution path
+        });
+
+        // Execution should revert because proposal is cancelled
+        PackedUserOperation[] memory execOps = new PackedUserOperation[](1);
+        execOps[0] = executionOp;
+        vm.prank(BUNDLER, BUNDLER);
+        vm.expectRevert();
+        entryPoint.handleOps(execOps, BENEFICIARY);
+
+        // Verify state was NOT changed
+        assertEq(accountWithGuardian.value(), 0, "Value should remain 0 after cancelled execution");
     }
 }
