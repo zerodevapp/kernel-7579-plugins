@@ -3,17 +3,17 @@ pragma solidity ^0.8.20;
 import {PolicyTestBase} from "./base/PolicyTestBase.sol";
 import {StatelessValidatorTestBase} from "./base/StatelessValidatorTestBase.sol";
 import {StatelessValidatorWithSenderTestBase} from "./base/StatelessValidatorWithSenderTestBase.sol";
-import {SignaturePolicy} from "src/policies/SignaturePolicy.sol";
+import {CallerPolicy} from "src/policies/CallerPolicy.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 import {IModule} from "src/interfaces/IERC7579Modules.sol";
 import "forge-std/console.sol";
 
-contract SignaturePolicyTest is PolicyTestBase, StatelessValidatorWithSenderTestBase {
+contract CallerPolicyTest is PolicyTestBase, StatelessValidatorWithSenderTestBase {
     address allowedCaller;
     address disallowedCaller;
 
     function deployModule() internal virtual override returns (IModule) {
-        return new SignaturePolicy();
+        return new CallerPolicy();
     }
 
     function _initializeTest() internal override {
@@ -28,7 +28,7 @@ contract SignaturePolicyTest is PolicyTestBase, StatelessValidatorWithSenderTest
     }
 
     function validUserOp() internal view virtual override returns (PackedUserOperation memory) {
-        // SignaturePolicy always passes for live policies in checkUserOpPolicy
+        // CallerPolicy always passes for live policies in checkUserOpPolicy
         return PackedUserOperation({
             sender: WALLET,
             nonce: 0,
@@ -43,7 +43,7 @@ contract SignaturePolicyTest is PolicyTestBase, StatelessValidatorWithSenderTest
     }
 
     function invalidUserOp() internal view virtual override returns (PackedUserOperation memory) {
-        // For SignaturePolicy, userOp validation always passes if policy is live
+        // For CallerPolicy, userOp validation always passes if policy is live
         // To make it fail, we would need to use a non-live policy, but that's tested separately
         // For this test, we'll just return a userOp (the fail case is tested by not installing)
         return PackedUserOperation({
@@ -66,7 +66,7 @@ contract SignaturePolicyTest is PolicyTestBase, StatelessValidatorWithSenderTest
         override
         returns (address sender, bytes memory signature)
     {
-        // Return allowed caller and any signature (signature content doesn't matter for SignaturePolicy)
+        // Return allowed caller and any signature (signature content doesn't matter for CallerPolicy)
         return (allowedCaller, "");
     }
 
@@ -81,10 +81,10 @@ contract SignaturePolicyTest is PolicyTestBase, StatelessValidatorWithSenderTest
         return (disallowedCaller, "");
     }
 
-    // Override the fail test because SignaturePolicy's checkUserOpPolicy doesn't validate based on userOp content
+    // Override the fail test because CallerPolicy's checkUserOpPolicy doesn't validate based on userOp content
     // It only checks if the policy is live for the calling account
     function testPolicyAfterInstallCheckUserOpPolicyFail() public payable override {
-        SignaturePolicy policyModule = SignaturePolicy(address(module));
+        CallerPolicy policyModule = CallerPolicy(address(module));
 
         // Don't install for this account
         address nonInstalledAccount = address(0xBEEF);

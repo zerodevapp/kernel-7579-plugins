@@ -1,0 +1,70 @@
+ECDSAValidatorBTTTest
+├── when calling isModuleType with MODULE_TYPE_VALIDATOR
+│   └── it should return true
+├── when calling isModuleType with MODULE_TYPE_HOOK
+│   └── it should return true
+├── when calling isModuleType with MODULE_TYPE_STATELESS_VALIDATOR
+│   └── it should return true
+├── when calling isModuleType with MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER
+│   └── it should return true
+├── when calling isModuleType with an unsupported type
+│   └── it should return false
+├── when calling onInstall with already initialized validator
+│   └── it should revert with AlreadyInitialized
+├── when calling onInstall with invalid data length
+│   └── it should revert with InvalidDataLength
+├── when calling onInstall with zero address owner
+│   └── it should revert with ZeroAddressOwner
+├── when calling onInstall with valid data
+│   ├── it should store the owner address
+│   └── it should emit OwnerRegistered event
+├── when calling onUninstall with not initialized validator
+│   └── it should revert with NotInitialized
+├── when calling onUninstall with initialized validator
+│   └── it should delete the owner from storage
+├── when calling validateUserOp with owner not set
+│   └── it should return SIG_VALIDATION_FAILED_UINT
+├── when calling validateUserOp with valid raw hash signature
+│   └── it should return SIG_VALIDATION_SUCCESS_UINT
+├── when calling validateUserOp with valid eth signed message hash
+│   └── it should return SIG_VALIDATION_SUCCESS_UINT
+├── when calling validateUserOp with invalid signature
+│   └── it should return SIG_VALIDATION_FAILED_UINT
+├── when calling isValidSignatureWithSender with owner not set
+│   └── it should return ERC1271_INVALID
+├── when calling isValidSignatureWithSender with valid raw hash signature
+│   └── it should return ERC1271_MAGICVALUE
+├── when calling isValidSignatureWithSender with valid eth signed message hash
+│   └── it should return ERC1271_MAGICVALUE
+├── when calling isValidSignatureWithSender with invalid signature
+│   └── it should return ERC1271_INVALID
+├── when calling validateSignatureWithData with valid raw hash signature
+│   └── it should return true
+├── when calling validateSignatureWithData with valid eth signed message hash
+│   └── it should return true
+├── when calling validateSignatureWithData with invalid signature
+│   └── it should return false
+├── when calling validateSignatureWithDataWithSender with valid raw hash signature
+│   └── it should return true
+├── when calling validateSignatureWithDataWithSender with valid eth signed message hash
+│   └── it should return true
+├── when calling validateSignatureWithDataWithSender with invalid signature
+│   └── it should return false
+├── when calling preCheck with msgSender not the owner
+│   └── it should revert with sender is not owner
+├── when calling preCheck with msgSender as the owner
+│   └── it should return empty bytes
+├── when calling postCheck with any hookData
+│   └── it should complete without reverting
+├── when calling validateUserOp with signature matching via first branch
+│   └── it should return SIG_VALIDATION_SUCCESS_UINT via raw hash match
+├── when calling validateUserOp with signature matching via second branch
+│   └── it should return SIG_VALIDATION_SUCCESS_UINT via eth hash match
+├── when calling validateUserOp with signature failing both branches
+│   └── it should return SIG_VALIDATION_FAILED_UINT after checking both hashes
+├── when calling isValidSignatureWithSender with signature matching via first branch
+│   └── it should return ERC1271_MAGICVALUE via raw hash match
+├── when calling isValidSignatureWithSender with signature matching via second branch
+│   └── it should return ERC1271_MAGICVALUE via eth hash match
+└── when calling isValidSignatureWithSender with signature failing both branches
+    └── it should return ERC1271_INVALID after checking both hashes
