@@ -77,6 +77,12 @@ contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessVal
             : SIG_VALIDATION_FAILED_UINT;
     }
 
+    /// @notice Validate an ERC-1271 signature
+    /// @dev The `sender` parameter (requesting protocol) is intentionally unused.
+    ///      This validator authenticates the SIGNER (owner), not the requesting protocol.
+    ///      WARNING: Because sender is ignored, any protocol can request signature
+    ///      validation. If you need to restrict which protocols can request signatures,
+    ///      pair this validator with a CallerPolicy.
     function isValidSignatureWithSender(address, bytes32 hash, bytes calldata sig)
         external
         view
