@@ -62,9 +62,9 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
 
     function _signerOninstall(bytes32 id, bytes calldata _data) internal override {
         require(signer[id][msg.sender] == address(0), "Already installed");
-        if (_data.length != 20) revert InvalidDataLength();
+        require(_data.length == 20, InvalidDataLength());
         address signerAddr = address(bytes20(_data[0:20]));
-        if (signerAddr == address(0)) revert ZeroAddressSigner();
+        require(signerAddr != address(0), ZeroAddressSigner());
         signer[id][msg.sender] = signerAddr;
     }
 

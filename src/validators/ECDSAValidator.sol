@@ -35,9 +35,9 @@ contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessVal
 
     function onInstall(bytes calldata _data) external payable override {
         if (_isInitialized(msg.sender)) revert AlreadyInitialized(msg.sender);
-        if (_data.length != 20) revert InvalidDataLength();
+        require(_data.length == 20, InvalidDataLength());
         address owner = address(bytes20(_data[0:20]));
-        if (owner == address(0)) revert ZeroAddressOwner();
+        require(owner != address(0), ZeroAddressOwner());
         ecdsaValidatorStorage[msg.sender].owner = owner;
         emit OwnerRegistered(msg.sender, owner);
     }
