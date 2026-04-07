@@ -72,6 +72,8 @@ contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessVal
         returns (uint256)
     {
         address owner = ecdsaValidatorStorage[msg.sender].owner;
+        // Fail if owner is not set (prevents matching with failed recovery returning address(0))
+        if (owner == address(0)) return SIG_VALIDATION_FAILED_UINT;
         return _verifySignature(userOpHash, userOp.signature, owner)
             ? SIG_VALIDATION_SUCCESS_UINT
             : SIG_VALIDATION_FAILED_UINT;
@@ -84,6 +86,8 @@ contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessVal
         returns (bytes4)
     {
         address owner = ecdsaValidatorStorage[msg.sender].owner;
+        // Fail if owner is not set (prevents matching with failed recovery returning address(0))
+        if (owner == address(0)) return ERC1271_INVALID;
         return _verifySignature(hash, sig, owner) ? ERC1271_MAGICVALUE : ERC1271_INVALID;
     }
 
