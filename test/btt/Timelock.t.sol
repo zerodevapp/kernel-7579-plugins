@@ -503,7 +503,7 @@ contract TimelockTest is Test {
     function test_GivenInitialized_WhenCallingCheckSignaturePolicy() external whenCallingCheckSignaturePolicy {
         // it should revert (TOB-KERNEL-20: signature validation not supported)
         vm.prank(WALLET);
-        vm.expectRevert("TimelockPolicy: signature validation not supported");
+        vm.expectRevert(TimelockPolicy.SignatureValidationNotSupported.selector);
         timelockPolicy.checkSignaturePolicy(POLICY_ID, address(0), bytes32(0), "");
     }
 
@@ -511,7 +511,7 @@ contract TimelockTest is Test {
         // it should revert (TOB-KERNEL-20: signature validation not supported)
         address uninitWallet = address(0xcccc);
         vm.prank(uninitWallet);
-        vm.expectRevert("TimelockPolicy: signature validation not supported");
+        vm.expectRevert(TimelockPolicy.SignatureValidationNotSupported.selector);
         timelockPolicy.checkSignaturePolicy(POLICY_ID, address(0), bytes32(0), "");
     }
 
@@ -524,7 +524,7 @@ contract TimelockTest is Test {
     function test_GivenDelayAndExpirationAreNonzero() external whenCallingValidateSignatureWithData {
         // it should revert (TOB-KERNEL-20: stateless signature validation not supported)
         bytes memory data = abi.encode(uint48(1 hours), uint48(1 days));
-        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        vm.expectRevert(TimelockPolicy.StatelessValidationNotSupported.selector);
         timelockPolicy.validateSignatureWithData(bytes32(0), "", data);
     }
 
@@ -534,7 +534,7 @@ contract TimelockTest is Test {
     {
         // it should revert (TOB-KERNEL-20: stateless signature validation not supported)
         bytes memory data = abi.encode(uint48(0), uint48(1 days));
-        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        vm.expectRevert(TimelockPolicy.StatelessValidationNotSupported.selector);
         timelockPolicy.validateSignatureWithData(bytes32(0), "", data);
     }
 
@@ -544,7 +544,7 @@ contract TimelockTest is Test {
     {
         // it should revert (TOB-KERNEL-20: stateless signature validation not supported)
         bytes memory data = abi.encode(uint48(1 hours), uint48(0));
-        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        vm.expectRevert(TimelockPolicy.StatelessValidationNotSupported.selector);
         timelockPolicy.validateSignatureWithData(bytes32(0), "", data);
     }
 
@@ -560,7 +560,7 @@ contract TimelockTest is Test {
     {
         // it should revert (TOB-KERNEL-20: stateless signature validation not supported)
         bytes memory data = abi.encode(uint48(1 hours), uint48(1 days));
-        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        vm.expectRevert(TimelockPolicy.StatelessValidationNotSupported.selector);
         timelockPolicy.validateSignatureWithDataWithSender(address(0), bytes32(0), "", data);
     }
 
@@ -570,7 +570,7 @@ contract TimelockTest is Test {
     {
         // it should revert (TOB-KERNEL-20: stateless signature validation not supported)
         bytes memory data = abi.encode(uint48(0), uint48(1 days));
-        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        vm.expectRevert(TimelockPolicy.StatelessValidationNotSupported.selector);
         timelockPolicy.validateSignatureWithDataWithSender(address(0), bytes32(0), "", data);
     }
 
@@ -580,7 +580,7 @@ contract TimelockTest is Test {
     {
         // it should revert (TOB-KERNEL-20: stateless signature validation not supported)
         bytes memory data = abi.encode(uint48(1 hours), uint48(0));
-        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        vm.expectRevert(TimelockPolicy.StatelessValidationNotSupported.selector);
         timelockPolicy.validateSignatureWithDataWithSender(address(0), bytes32(0), "", data);
     }
 

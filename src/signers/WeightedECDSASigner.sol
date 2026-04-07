@@ -36,6 +36,14 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce)");
 
     error ZeroWeightSigner();
+    error LengthMismatch();
+    error EmptyGuardians();
+    error ZeroThreshold();
+    error GuardianCannotBeSelf();
+    error ZeroAddressGuardian();
+    error ZeroWeight();
+    error GuardianAlreadyEnabled();
+    error SignersNotSorted();
     error ThresholdExceedsTotalWeight();
 
     mapping(bytes32 id => mapping(address kernel => WeightedECDSASignerStorage)) public weightedStorage;
@@ -54,16 +62,16 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
 
         (address[] memory _guardians, uint24[] memory _weights, uint24 _threshold) =
             abi.decode(_data, (address[], uint24[], uint24));
-        require(_guardians.length == _weights.length, "Length mismatch");
-        require(_guardians.length > 0, "No guardians");
-        require(_threshold > 0, "Zero threshold");
+        require(_guardians.length == _weights.length, LengthMismatch());
+        require(_guardians.length > 0, EmptyGuardians());
+        require(_threshold > 0, ZeroThreshold());
 
         weightedStorage[id][msg.sender].firstGuardian = msg.sender;
         for (uint256 i = 0; i < _guardians.length; i++) {
-            require(_guardians[i] != msg.sender, "Guardian cannot be self");
-            require(_guardians[i] != address(0), "Guardian cannot be 0");
-            require(_weights[i] != 0, "Weight cannot be 0");
-            require(guardian[_guardians[i]][id][msg.sender].weight == 0, "Guardian already enabled");
+            require(_guardians[i] != msg.sender, GuardianCannotBeSelf());
+            require(_guardians[i] != address(0), ZeroAddressGuardian());
+            require(_weights[i] != 0, ZeroWeight());
+            require(guardian[_guardians[i]][id][msg.sender].weight == 0, GuardianAlreadyEnabled());
             guardian[_guardians[i]][id][msg.sender] =
                 GuardianStorage({weight: _weights[i], nextGuardian: weightedStorage[id][msg.sender].firstGuardian});
             weightedStorage[id][msg.sender].firstGuardian = _guardians[i];
@@ -190,7 +198,7 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
             signer = ECDSA.tryRecoverCalldata(proposalHash, sig[i * 65:(i + 1) * 65]);
 
             // Enforce sorted order to prevent signature reuse
-            require(signer > lastSigner, "Signers not sorted");
+            require(signer > lastSigner, SignersNotSorted());
             lastSigner = signer;
             proposalSigners[i] = signer;
 

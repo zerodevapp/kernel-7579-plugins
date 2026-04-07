@@ -68,6 +68,8 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
     error ProposalNotPending();
     error OnlyAccount();
     error ParametersTooLarge();
+    error SignatureValidationNotSupported();
+    error StatelessValidationNotSupported();
 
     /**
      * @notice Install the timelock policy
@@ -326,7 +328,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
      * @dev TimelockPolicy does not support ERC-1271 signature validation - always reverts
      */
     function checkSignaturePolicy(bytes32, address, bytes32, bytes calldata) external pure override returns (uint256) {
-        revert("TimelockPolicy: signature validation not supported");
+        revert SignatureValidationNotSupported();
     }
 
     function validateSignatureWithData(bytes32, bytes calldata, bytes calldata)
@@ -335,7 +337,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         override(IStatelessValidator)
         returns (bool)
     {
-        revert("TimelockPolicy: stateless signature validation not supported");
+        revert StatelessValidationNotSupported();
     }
 
     function validateSignatureWithDataWithSender(address, bytes32, bytes calldata, bytes calldata)
@@ -344,7 +346,7 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         override(IStatelessValidatorWithSender)
         returns (bool)
     {
-        revert("TimelockPolicy: stateless signature validation not supported");
+        revert StatelessValidationNotSupported();
     }
 
     // ==================== Internal Shared Logic ====================
