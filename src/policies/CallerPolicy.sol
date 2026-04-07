@@ -30,6 +30,8 @@ import {
 contract CallerPolicy is PolicyBase, IStatelessValidatorWithSender {
     error PolicyAlreadyInstalled();
     error PolicyNotLive();
+    error EmptyCallers();
+    error ZeroAddressCaller();
 
     mapping(bytes32 id => mapping(address => Status)) public status;
     /// @notice Maps policy ID => requesting protocol => wallet => whether protocol is allowed
@@ -87,9 +89,9 @@ contract CallerPolicy is PolicyBase, IStatelessValidatorWithSender {
     function _policyOninstall(bytes32 id, bytes calldata _data) internal override {
         require(status[id][msg.sender] == Status.NA, PolicyAlreadyInstalled());
         address[] memory callers = abi.decode(_data, (address[]));
-        require(callers.length > 0, "Empty callers array");
+        require(callers.length > 0, EmptyCallers());
         for (uint256 i = 0; i < callers.length; i++) {
-            require(callers[i] != address(0), "Zero address caller");
+            require(callers[i] != address(0), ZeroAddressCaller());
             allowedCaller[id][callers[i]][msg.sender] = true;
         }
         status[id][msg.sender] = Status.Live;

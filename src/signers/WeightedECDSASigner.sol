@@ -44,6 +44,7 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
     error ZeroWeight();
     error GuardianAlreadyEnabled();
     error SignersNotSorted();
+    error ThresholdExceedsTotalWeight();
 
     mapping(bytes32 id => mapping(address kernel => WeightedECDSASignerStorage)) public weightedStorage;
     mapping(address guardian => mapping(bytes32 id => mapping(address kernel => GuardianStorage))) public guardian;
@@ -77,6 +78,7 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
             weightedStorage[id][msg.sender].totalWeight += _weights[i];
             emit GuardianAdded(_guardians[i], msg.sender, _weights[i]);
         }
+        require(_threshold <= weightedStorage[id][msg.sender].totalWeight, ThresholdExceedsTotalWeight());
         weightedStorage[id][msg.sender].threshold = _threshold;
     }
 
