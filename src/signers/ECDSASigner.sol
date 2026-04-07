@@ -17,6 +17,8 @@ import {
 contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWithSender {
     error InvalidDataLength();
     error ZeroAddressSigner();
+    error SignerAlreadySet();
+    error SignerNotSet();
 
     mapping(bytes32 id => mapping(address wallet => address)) public signer;
 
@@ -48,6 +50,12 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
             : SIG_VALIDATION_FAILED_UINT;
     }
 
+    /// @notice Validate an ERC-1271 signature
+    /// @dev The `sender` parameter (requesting protocol) is intentionally unused.
+    ///      This signer authenticates the SIGNER (owner), not the requesting protocol.
+    ///      WARNING: Because sender is ignored, any protocol can request signature
+    ///      validation. If you need to restrict which protocols can request signatures,
+    ///      pair this signer with a CallerPolicy.
     function checkSignature(bytes32 id, address sender, bytes32 hash, bytes calldata sig)
         external
         view
@@ -61,15 +69,15 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
     }
 
     function _signerOninstall(bytes32 id, bytes calldata _data) internal override {
-        require(signer[id][msg.sender] == address(0), "Already installed");
-        if (_data.length != 20) revert InvalidDataLength();
+        require(signer[id][msg.sender] == address(0), SignerAlreadySet());
+        require(_data.length == 20, InvalidDataLength());
         address signerAddr = address(bytes20(_data[0:20]));
-        if (signerAddr == address(0)) revert ZeroAddressSigner();
+        require(signerAddr != address(0), ZeroAddressSigner());
         signer[id][msg.sender] = signerAddr;
     }
 
     function _signerOnUninstall(bytes32 id, bytes calldata) internal override {
-        require(signer[id][msg.sender] != address(0));
+        require(signer[id][msg.sender] != address(0), SignerNotSet());
         delete signer[id][msg.sender];
     }
 

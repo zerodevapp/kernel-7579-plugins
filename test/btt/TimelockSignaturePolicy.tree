@@ -1,0 +1,9 @@
+TimelockSignaturePolicyTest
+├── when checking signature policy
+│   └── it should revert because signature validation is not supported
+├── when checking signature policy without install
+│   └── it should revert because signature validation is not supported
+├── when validating signature with data
+│   └── it should revert because stateless signature validation is not supported
+└── when validating signature with data with sender
+    └── it should revert because stateless signature validation is not supported

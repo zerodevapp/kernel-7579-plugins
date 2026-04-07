@@ -11,6 +11,7 @@ import "forge-std/console.sol";
 contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, StatelessValidatorWithSenderTestBase {
     uint48 delay = 1 days;
     uint48 expirationPeriod = 1 days;
+    address guardian = address(0);
 
     function deployModule() internal virtual override returns (IModule) {
         return new TimelockPolicy();
@@ -19,7 +20,7 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
     function _initializeTest() internal override {}
 
     function installData() internal view override returns (bytes memory) {
-        return abi.encode(delay, expirationPeriod);
+        return abi.encode(delay, expirationPeriod, guardian);
     }
 
     function validUserOp() internal view virtual override returns (PackedUserOperation memory) {
@@ -107,21 +108,33 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         return statelessValidationSignature(bytes32(0), valid);
     }
 
-    // Override stateless validator tests to use proper data parameter
+    // Override stateless validator tests - TimelockPolicy reverts for stateless validation
     function testStatlessValidatorFail() external override {
         IStatelessValidator validatorModule = IStatelessValidator(address(module));
 
         bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
         (, bytes memory sig) = statelessValidationSignature(message, false);
 
-        // For TimelockPolicy, validation fails if delay or expirationPeriod is 0
-        bytes memory invalidData = abi.encode(uint48(0), uint48(0));
+        bytes memory data = abi.encode(uint48(0), uint48(0), address(0));
 
         vm.startPrank(WALLET);
-        bool result = validatorModule.validateSignatureWithData(message, sig, invalidData);
+        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        validatorModule.validateSignatureWithData(message, sig, data);
         vm.stopPrank();
+    }
 
-        assertFalse(result);
+    function testStatelessValidatorSuccess() external override {
+        IStatelessValidator validatorModule = IStatelessValidator(address(module));
+
+        bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
+        (, bytes memory sig) = statelessValidationSignature(message, true);
+
+        bytes memory validData = abi.encode(delay, expirationPeriod);
+
+        vm.startPrank(WALLET);
+        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        validatorModule.validateSignatureWithData(message, sig, validData);
+        vm.stopPrank();
     }
 
     function testStatelessValidatorWithSenderFail() external override {
@@ -130,14 +143,26 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
         (address caller, bytes memory sig) = statelessValidationSignatureWithSender(message, false);
 
-        // For TimelockPolicy, validation fails if delay or expirationPeriod is 0
-        bytes memory invalidData = abi.encode(uint48(0), uint48(0));
+        bytes memory data = abi.encode(uint48(0), uint48(0), address(0));
 
         vm.startPrank(WALLET);
-        bool result = validatorModule.validateSignatureWithDataWithSender(caller, message, sig, invalidData);
+        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        validatorModule.validateSignatureWithDataWithSender(caller, message, sig, data);
         vm.stopPrank();
+    }
 
-        assertFalse(result);
+    function testStatelessValidatorWithSenderSuccess() external override {
+        IStatelessValidatorWithSender validatorModule = IStatelessValidatorWithSender(address(module));
+
+        bytes32 message = keccak256(abi.encodePacked("TEST_MESSAGE"));
+        (address caller, bytes memory sig) = statelessValidationSignatureWithSender(message, true);
+
+        bytes memory validData = abi.encode(delay, expirationPeriod);
+
+        vm.startPrank(WALLET);
+        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        validatorModule.validateSignatureWithDataWithSender(caller, message, sig, validData);
+        vm.stopPrank();
     }
 
     // Override the checkUserOpPolicy tests because TimelockPolicy has special behavior
@@ -149,9 +174,22 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
 
         PackedUserOperation memory userOp = validUserOp();
 
-        // First create a proposal
+        // Create proposal via no-op UserOp (creates Pending directly with clock started)
+        bytes memory sig =
+            abi.encodePacked(bytes32(userOp.callData.length), userOp.callData, bytes32(userOp.nonce), bytes1(0x00));
+        PackedUserOperation memory noopOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
         vm.startPrank(WALLET);
-        policyModule.createProposal(policyId(), WALLET, userOp.callData, userOp.nonce);
+        policyModule.checkUserOpPolicy(policyId(), noopOp);
         vm.stopPrank();
 
         // Fast forward past the delay
@@ -184,22 +222,32 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         assertEq(validationResult, 1);
     }
 
-    // Override signature policy test because TimelockPolicy always passes for installed accounts
+    // Override signature policy tests - TimelockPolicy reverts for signature validation
+    function testPolicyCheckSignaturePolicySuccess() public payable override {
+        TimelockPolicy policyModule = TimelockPolicy(address(module));
+        vm.startPrank(WALLET);
+        policyModule.onInstall(abi.encodePacked(policyId(), installData()));
+        vm.stopPrank();
+
+        bytes32 testHash = keccak256(abi.encodePacked("TEST_HASH"));
+        (address sender, bytes memory sigData) = validSignatureData(testHash);
+
+        vm.startPrank(WALLET);
+        vm.expectRevert("TimelockPolicy: signature validation not supported");
+        policyModule.checkSignaturePolicy(policyId(), sender, testHash, sigData);
+        vm.stopPrank();
+    }
+
     function testPolicyCheckSignaturePolicyFail() public payable override {
         TimelockPolicy policyModule = TimelockPolicy(address(module));
-
-        // Don't install for this wallet
-        address nonInstalledWallet = address(0xBEEF);
 
         bytes32 testHash = keccak256(abi.encodePacked("TEST_HASH"));
         (address sender, bytes memory sigData) = invalidSignatureData(testHash);
 
-        vm.startPrank(nonInstalledWallet);
-        uint256 result = policyModule.checkSignaturePolicy(policyId(), sender, testHash, sigData);
+        vm.startPrank(WALLET);
+        vm.expectRevert("TimelockPolicy: signature validation not supported");
+        policyModule.checkSignaturePolicy(policyId(), sender, testHash, sigData);
         vm.stopPrank();
-
-        // Should fail for non-installed account
-        assertFalse(result == 0);
     }
 
     // Additional TimelockPolicy-specific tests
@@ -213,9 +261,25 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         bytes memory callData = hex"1234";
         uint256 nonce = 1;
 
+        // Create proposal via no-op UserOp
+        bytes memory sig = abi.encodePacked(bytes32(callData.length), callData, bytes32(nonce), bytes1(0x00));
+        PackedUserOperation memory noopOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
+
         vm.startPrank(WALLET);
-        policyModule.createProposal(policyId(), WALLET, callData, nonce);
+        uint256 result = policyModule.checkUserOpPolicy(policyId(), noopOp);
         vm.stopPrank();
+
+        assertEq(result, 0);
 
         // Verify proposal was created
         (TimelockPolicy.ProposalStatus status, uint256 validAfter, uint256 validUntil) =
@@ -235,9 +299,22 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         bytes memory callData = hex"1234";
         uint256 nonce = 1;
 
-        // Create proposal
+        // Create proposal via no-op UserOp
+        bytes memory sig = abi.encodePacked(bytes32(callData.length), callData, bytes32(nonce), bytes1(0x00));
+        PackedUserOperation memory noopOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
+
         vm.startPrank(WALLET);
-        policyModule.createProposal(policyId(), WALLET, callData, nonce);
+        policyModule.checkUserOpPolicy(policyId(), noopOp);
         vm.stopPrank();
 
         // Cancel proposal
@@ -284,13 +361,151 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         uint256 result = policyModule.checkUserOpPolicy(policyId(), userOp);
         vm.stopPrank();
 
-        // Should return failure (1) because this was proposal creation, not execution
-        assertEq(result, 1);
+        // Returns success (validationData = 0) for state persistence
+        assertEq(result, 0);
 
         // Verify proposal was created
         (TimelockPolicy.ProposalStatus status,,) =
             policyModule.getProposal(WALLET, proposalCallData, proposalNonce, policyId(), WALLET);
 
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending));
+    }
+
+    // Test that stale proposals from previous installations cannot be executed
+    function testStaleProposalNotExecutableAfterReinstall() public {
+        TimelockPolicy policyModule = TimelockPolicy(address(module));
+        vm.startPrank(WALLET);
+        policyModule.onInstall(abi.encodePacked(policyId(), installData()));
+        vm.stopPrank();
+
+        PackedUserOperation memory userOp = validUserOp();
+
+        // Create proposal via no-op UserOp (creates Pending directly)
+        bytes memory sig =
+            abi.encodePacked(bytes32(userOp.callData.length), userOp.callData, bytes32(userOp.nonce), bytes1(0x00));
+        PackedUserOperation memory noopOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
+        vm.startPrank(WALLET);
+        policyModule.checkUserOpPolicy(policyId(), noopOp);
+        vm.stopPrank();
+
+        // Fast forward past delay
+        vm.warp(block.timestamp + delay + 1);
+
+        // Uninstall the policy
+        vm.startPrank(WALLET);
+        policyModule.onUninstall(abi.encodePacked(policyId(), ""));
+        vm.stopPrank();
+
+        // Reinstall the policy
+        vm.startPrank(WALLET);
+        policyModule.onInstall(abi.encodePacked(policyId(), installData()));
+        vm.stopPrank();
+
+        // Try to execute the stale proposal - should fail
+        vm.startPrank(WALLET);
+        uint256 validationResult = policyModule.checkUserOpPolicy(policyId(), userOp);
+        vm.stopPrank();
+
+        // Should fail (return 1 = SIG_VALIDATION_FAILED_UINT) because proposal is from previous epoch
+        assertEq(validationResult, 1);
+    }
+
+    // Test that execution returns correct validAfter (delay end) for EntryPoint enforcement
+    function testExecutionReturnsCorrectValidAfter() public {
+        TimelockPolicy policyModule = TimelockPolicy(address(module));
+        vm.startPrank(WALLET);
+        policyModule.onInstall(abi.encodePacked(policyId(), installData()));
+        vm.stopPrank();
+
+        PackedUserOperation memory userOp = validUserOp();
+
+        // Create a proposal via no-op UserOp
+        bytes memory sig =
+            abi.encodePacked(bytes32(userOp.callData.length), userOp.callData, bytes32(userOp.nonce), bytes1(0x00));
+        PackedUserOperation memory noopOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
+        vm.startPrank(WALLET);
+        policyModule.checkUserOpPolicy(policyId(), noopOp);
+        vm.stopPrank();
+
+        // Get stored proposal timing
+        (, uint256 storedValidAfter, uint256 storedValidUntil) =
+            policyModule.getProposal(WALLET, userOp.callData, userOp.nonce, policyId(), WALLET);
+
+        // Fast forward past delay
+        vm.warp(block.timestamp + delay + 1);
+
+        // Execute the proposal
+        vm.startPrank(WALLET);
+        uint256 validationResult = policyModule.checkUserOpPolicy(policyId(), userOp);
+        vm.stopPrank();
+
+        // Validation should succeed
+        assertFalse(validationResult == 1); // Not a failure
+
+        // Extract validAfter from packed validation data
+        uint48 returnedValidAfter = uint48(validationResult >> 208);
+
+        // validAfter should match the stored validAfter (delay end)
+        assertEq(returnedValidAfter, uint48(storedValidAfter), "validAfter should be delay end");
+    }
+
+    // Test that owner can cancel during delay period
+    function testCancelDuringDelayPeriod() public {
+        TimelockPolicy policyModule = TimelockPolicy(address(module));
+        vm.startPrank(WALLET);
+        policyModule.onInstall(abi.encodePacked(policyId(), installData()));
+        vm.stopPrank();
+
+        bytes memory callData = hex"1234";
+        uint256 nonce = 1;
+
+        // Create proposal via no-op UserOp
+        bytes memory sig = abi.encodePacked(bytes32(callData.length), callData, bytes32(nonce), bytes1(0x00));
+        PackedUserOperation memory noopOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 0,
+            initCode: "",
+            callData: "",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: sig
+        });
+        vm.startPrank(WALLET);
+        policyModule.checkUserOpPolicy(policyId(), noopOp);
+        vm.stopPrank();
+
+        // Fast forward partially into delay (still before validAfter)
+        vm.warp(block.timestamp + delay / 2);
+
+        // Cancel proposal (should work during delay period)
+        vm.startPrank(WALLET);
+        policyModule.cancelProposal(policyId(), WALLET, callData, nonce);
+        vm.stopPrank();
+
+        // Verify proposal was cancelled
+        (TimelockPolicy.ProposalStatus status,,) = policyModule.getProposal(WALLET, callData, nonce, policyId(), WALLET);
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Cancelled));
     }
 }

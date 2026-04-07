@@ -36,6 +36,15 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce)");
 
     error ZeroWeightSigner();
+    error LengthMismatch();
+    error EmptyGuardians();
+    error ZeroThreshold();
+    error GuardianCannotBeSelf();
+    error ZeroAddressGuardian();
+    error ZeroWeight();
+    error GuardianAlreadyEnabled();
+    error SignersNotSorted();
+    error ThresholdExceedsTotalWeight();
 
     mapping(bytes32 id => mapping(address kernel => WeightedECDSASignerStorage)) public weightedStorage;
     mapping(address guardian => mapping(bytes32 id => mapping(address kernel => GuardianStorage))) public guardian;
@@ -53,22 +62,23 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
 
         (address[] memory _guardians, uint24[] memory _weights, uint24 _threshold) =
             abi.decode(_data, (address[], uint24[], uint24));
-        require(_guardians.length == _weights.length, "Length mismatch");
-        require(_guardians.length > 0, "No guardians");
-        require(_threshold > 0, "Zero threshold");
+        require(_guardians.length == _weights.length, LengthMismatch());
+        require(_guardians.length > 0, EmptyGuardians());
+        require(_threshold > 0, ZeroThreshold());
 
         weightedStorage[id][msg.sender].firstGuardian = msg.sender;
         for (uint256 i = 0; i < _guardians.length; i++) {
-            require(_guardians[i] != msg.sender, "Guardian cannot be self");
-            require(_guardians[i] != address(0), "Guardian cannot be 0");
-            require(_weights[i] != 0, "Weight cannot be 0");
-            require(guardian[_guardians[i]][id][msg.sender].weight == 0, "Guardian already enabled");
+            require(_guardians[i] != msg.sender, GuardianCannotBeSelf());
+            require(_guardians[i] != address(0), ZeroAddressGuardian());
+            require(_weights[i] != 0, ZeroWeight());
+            require(guardian[_guardians[i]][id][msg.sender].weight == 0, GuardianAlreadyEnabled());
             guardian[_guardians[i]][id][msg.sender] =
                 GuardianStorage({weight: _weights[i], nextGuardian: weightedStorage[id][msg.sender].firstGuardian});
             weightedStorage[id][msg.sender].firstGuardian = _guardians[i];
             weightedStorage[id][msg.sender].totalWeight += _weights[i];
             emit GuardianAdded(_guardians[i], msg.sender, _weights[i]);
         }
+        require(_threshold <= weightedStorage[id][msg.sender].totalWeight, ThresholdExceedsTotalWeight());
         weightedStorage[id][msg.sender].threshold = _threshold;
     }
 
@@ -102,6 +112,12 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         return _validateUserOpSignature(id, userOp, userOpHash, userOp.signature, msg.sender);
     }
 
+    /// @notice Validate an ERC-1271 signature
+    /// @dev The `sender` parameter (requesting protocol) is intentionally unused.
+    ///      This signer authenticates the SIGNERS (guardians), not the requesting protocol.
+    ///      WARNING: Because sender is ignored, any protocol can request signature
+    ///      validation. If you need to restrict which protocols can request signatures,
+    ///      pair this signer with a CallerPolicy.
     function checkSignature(bytes32 id, address, bytes32 hash, bytes calldata sig)
         external
         view
@@ -138,6 +154,15 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
     /**
      * @notice Internal function to validate user operation signatures
      * @dev Shared logic for both installed and stateless validator modes
+     *
+     *      SECURITY: Split Signature Scheme
+     *      The first N-1 signatures verify a proposalHash (EIP-712 typed data covering
+     *      account, id, callData, and nonce). The last signature MUST verify the full
+     *      userOpHash to bind the complete UserOp (including gas fields).
+     *      This prevents a scenario where guardians approve a proposal but an attacker
+     *      manipulates gas parameters in the final UserOp.
+     *      A double-counting check ensures a guardian who signed both the proposalHash
+     *      and userOpHash only has their weight counted once.
      */
     function _validateUserOpSignature(
         bytes32 id,
@@ -188,7 +213,7 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
             signer = ECDSA.tryRecoverCalldata(proposalHash, sig[i * 65:(i + 1) * 65]);
 
             // Enforce sorted order to prevent signature reuse
-            require(signer > lastSigner, "Signers not sorted");
+            require(signer > lastSigner, SignersNotSorted());
             lastSigner = signer;
             proposalSigners[i] = signer;
 
