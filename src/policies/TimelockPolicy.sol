@@ -18,6 +18,26 @@ import {
  * @title TimelockPolicy
  * @notice A policy module that enforces time-delayed execution of transactions for enhanced security
  * @dev Users must first create a proposal, wait for the timelock delay, then execute
+ *
+ *      SECURITY: Signer Trust Assumption
+ *      This policy trusts whichever signer module is configured on the permission.
+ *      It does NOT independently verify who signed the UserOp — that responsibility
+ *      belongs to the signer module (e.g., ECDSASigner, WeightedECDSASigner).
+ *      The signer validates the signature; this policy only enforces the timelock.
+ *
+ *      SECURITY: Nonce Isolation
+ *      Proposals are keyed by keccak256(account, keccak256(callData), nonce).
+ *      The nonce here is the full ERC-4337 nonce (192-bit key | 64-bit sequence).
+ *      Each permission has a distinct nonce key, so proposals under different
+ *      permissions are naturally isolated — a proposal created under permission A
+ *      cannot be executed under permission B.
+ *
+ *      SECURITY: Guardian Design
+ *      The guardian is a CANCELLATION-ONLY role. It cannot create or execute proposals.
+ *      The guardian is scoped per (policyId, wallet) — a guardian for one policy/wallet
+ *      pair cannot cancel proposals belonging to another pair. Guardian is set at install
+ *      time and persists until uninstall. Setting guardian to address(0) disables the
+ *      guardian feature, meaning only the account itself can cancel proposals.
  */
 contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorWithSender {
     enum ProposalStatus {

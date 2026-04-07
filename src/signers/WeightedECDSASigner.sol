@@ -112,6 +112,12 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         return _validateUserOpSignature(id, userOp, userOpHash, userOp.signature, msg.sender);
     }
 
+    /// @notice Validate an ERC-1271 signature
+    /// @dev The `sender` parameter (requesting protocol) is intentionally unused.
+    ///      This signer authenticates the SIGNERS (guardians), not the requesting protocol.
+    ///      WARNING: Because sender is ignored, any protocol can request signature
+    ///      validation. If you need to restrict which protocols can request signatures,
+    ///      pair this signer with a CallerPolicy.
     function checkSignature(bytes32 id, address, bytes32 hash, bytes calldata sig)
         external
         view
@@ -148,6 +154,15 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
     /**
      * @notice Internal function to validate user operation signatures
      * @dev Shared logic for both installed and stateless validator modes
+     *
+     *      SECURITY: Split Signature Scheme
+     *      The first N-1 signatures verify a proposalHash (EIP-712 typed data covering
+     *      account, id, callData, and nonce). The last signature MUST verify the full
+     *      userOpHash to bind the complete UserOp (including gas fields).
+     *      This prevents a scenario where guardians approve a proposal but an attacker
+     *      manipulates gas parameters in the final UserOp.
+     *      A double-counting check ensures a guardian who signed both the proposalHash
+     *      and userOpHash only has their weight counted once.
      */
     function _validateUserOpSignature(
         bytes32 id,

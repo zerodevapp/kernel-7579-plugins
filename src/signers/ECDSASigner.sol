@@ -50,6 +50,12 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
             : SIG_VALIDATION_FAILED_UINT;
     }
 
+    /// @notice Validate an ERC-1271 signature
+    /// @dev The `sender` parameter (requesting protocol) is intentionally unused.
+    ///      This signer authenticates the SIGNER (owner), not the requesting protocol.
+    ///      WARNING: Because sender is ignored, any protocol can request signature
+    ///      validation. If you need to restrict which protocols can request signatures,
+    ///      pair this signer with a CallerPolicy.
     function checkSignature(bytes32 id, address sender, bytes32 hash, bytes calldata sig)
         external
         view
