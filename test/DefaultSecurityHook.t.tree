@@ -1,0 +1,110 @@
+DefaultSecurityHookBTTTest
+├── when calling onInstall
+│   ├── given account is already initialized
+│   │   └── it should revert with AlreadyInitialized
+│   ├── given data is empty
+│   │   ├── it should mark account as initialized
+│   │   └── it should emit Initialized event
+│   └── given data contains allowlist configs
+│       ├── it should mark account as initialized
+│       ├── it should set allowlist entries for each config
+│       └── it should emit Initialized event
+├── when calling onUninstall
+│   ├── given account is not initialized
+│   │   └── it should revert with NotInitialized
+│   ├── given data is empty
+│   │   ├── it should mark account as not initialized
+│   │   └── it should emit Uninitialized event
+│   └── given data contains targets to clean
+│       ├── it should clear allowlist entries for each target
+│       ├── it should mark account as not initialized
+│       └── it should emit Uninitialized event
+├── when calling isModuleType
+│   ├── given moduleTypeId is MODULE_TYPE_HOOK
+│   │   └── it should return true
+│   └── given moduleTypeId is not MODULE_TYPE_HOOK
+│       └── it should return false
+├── when calling preCheck with DELEGATECALL mode
+│   └── it should revert with DelegateCallNotAllowed
+├── when calling preCheck with SINGLE mode
+│   ├── given target is allowlisted with all selectors
+│   │   └── it should return empty bytes
+│   ├── given target is allowlisted with specific selector matching call
+│   │   └── it should return empty bytes
+│   ├── given target is allowlisted with specific selector not matching call
+│   │   └── it should revert with TokenTransferNotAllowed
+│   ├── given target is self
+│   │   └── it should revert with SelfCallNotAllowed
+│   ├── given target is a module
+│   │   └── it should revert with ModuleCallNotAllowed
+│   ├── given value is greater than zero
+│   │   └── it should revert with ETHTransferNotAllowed
+│   ├── given selector is ERC20 transfer
+│   │   └── it should revert with TokenTransferNotAllowed
+│   ├── given selector is ERC20 approve
+│   │   └── it should revert with TokenTransferNotAllowed
+│   ├── given selector is ERC20 transferFrom
+│   │   └── it should revert with TokenTransferNotAllowed
+│   ├── given selector is ERC20 increaseAllowance
+│   │   └── it should revert with TokenTransferNotAllowed
+│   ├── given selector is ERC20 decreaseAllowance
+│   │   └── it should revert with TokenTransferNotAllowed
+│   ├── given selector is ERC721 safeTransferFrom
+│   │   └── it should revert with TokenTransferNotAllowed
+│   ├── given selector is ERC721 safeTransferFromWithData
+│   │   └── it should revert with TokenTransferNotAllowed
+│   ├── given selector is ERC721 setApprovalForAll
+│   │   └── it should revert with TokenTransferNotAllowed
+│   ├── given selector is ERC1155 safeTransferFrom
+│   │   └── it should revert with TokenTransferNotAllowed
+│   ├── given selector is ERC1155 safeBatchTransferFrom
+│   │   └── it should revert with TokenTransferNotAllowed
+│   ├── given call has no blocked selector and no value and target is clean
+│   │   └── it should return empty bytes
+│   └── given calldata is less than 4 bytes
+│       └── it should return empty bytes
+├── when calling preCheck with BATCH mode
+│   ├── given all calls in batch are clean
+│   │   └── it should return empty bytes
+│   ├── given one call in batch has blocked selector
+│   │   └── it should revert with TokenTransferNotAllowed
+│   └── given batch has allowlisted and blocked calls
+│       └── it should revert for the blocked call
+├── when calling postCheck
+│   └── it should not revert
+├── when calling setAllowlist
+│   ├── given caller is not initialized
+│   │   └── it should revert with Unauthorized
+│   ├── given setting with empty selectors
+│   │   ├── it should set allSelectorsAllowed to true
+│   │   └── it should emit AllowlistSet event
+│   └── given setting with specific selectors
+│       ├── it should set each selector as allowed
+│       ├── it should set allSelectorsAllowed to false
+│       └── it should emit AllowlistSet event
+├── when calling removeAllowlist
+│   ├── given caller is not initialized
+│   │   └── it should revert with Unauthorized
+│   └── given removing existing target
+│       ├── it should set allowed to false
+│       └── it should emit AllowlistRemoved event
+├── when calling isInitialized
+│   ├── given account is initialized
+│   │   └── it should return true
+│   └── given account is not initialized
+│       └── it should return false
+├── when calling isAllowlisted
+│   ├── given target is allowlisted
+│   │   └── it should return true
+│   └── given target is not allowlisted
+│       └── it should return false
+└── when calling isSelectorAllowed
+    ├── given target is not allowlisted
+    │   └── it should return false
+    ├── given target is allowlisted with all selectors
+    │   └── it should return true for any selector
+    └── given target is allowlisted with specific selectors
+        ├── given queried selector is in the list
+        │   └── it should return true
+        └── given queried selector is not in the list
+            └── it should return false
