@@ -7,10 +7,7 @@ import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOper
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {EntryPointLib} from "../utils/EntryPointLib.sol";
 import {ECDSA} from "solady/utils/ECDSA.sol";
-import {
-    SIG_VALIDATION_FAILED_UINT,
-    SIG_VALIDATION_SUCCESS_UINT
-} from "src/types/Constants.sol";
+import {SIG_VALIDATION_FAILED_UINT, SIG_VALIDATION_SUCCESS_UINT} from "src/types/Constants.sol";
 
 /// @title WeightedECDSAUserOpHashTest
 /// @notice BTT tests for the security fix on branch fix/tob-kernel-16
@@ -270,7 +267,11 @@ contract WeightedECDSAUserOpHashTest is Test {
         vm.prank(WALLET);
         uint256 result = testModule.checkUserOpSignature(SIGNER_ID, userOp, userOpHash);
 
-        assertEq(result, SIG_VALIDATION_SUCCESS_UINT, "Should succeed when guardian weight meets threshold even without double counting");
+        assertEq(
+            result,
+            SIG_VALIDATION_SUCCESS_UINT,
+            "Should succeed when guardian weight meets threshold even without double counting"
+        );
     }
 
     function test_WhenProposalHashSignaturesReachThresholdButUserOpHashIsMissing() external {
@@ -469,6 +470,10 @@ contract WeightedECDSAUserOpHashTest is Test {
         vm.prank(WALLET);
         uint256 result = signerModule.checkUserOpSignature(SIGNER_ID, userOp, userOpHash);
 
-        assertEq(result, SIG_VALIDATION_SUCCESS_UINT, "Should succeed when lower address guardian signs userOpHash (no sorted order required for last signer)");
+        assertEq(
+            result,
+            SIG_VALIDATION_SUCCESS_UINT,
+            "Should succeed when lower address guardian signs userOpHash (no sorted order required for last signer)"
+        );
     }
 }

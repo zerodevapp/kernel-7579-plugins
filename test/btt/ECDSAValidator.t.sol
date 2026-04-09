@@ -440,9 +440,7 @@ contract ECDSAValidatorBTTTest is Test {
         vm.prank(wallet);
         uint256 result = ecdsaValidator.validateUserOp(userOp, userOpHash);
         assertEq(
-            result,
-            SIG_VALIDATION_FAILED_UINT,
-            "Should return SIG_VALIDATION_FAILED_UINT after both branches fail"
+            result, SIG_VALIDATION_FAILED_UINT, "Should return SIG_VALIDATION_FAILED_UINT after both branches fail"
         );
     }
 
