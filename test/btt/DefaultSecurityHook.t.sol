@@ -7,6 +7,12 @@ import {IModule} from "src/interfaces/IERC7579Modules.sol";
 import {MODULE_TYPE_HOOK} from "src/types/Constants.sol";
 import {LibERC7579} from "solady/accounts/LibERC7579.sol";
 import {IERC7579Execution, Execution} from "openzeppelin-contracts/contracts/interfaces/draft-IERC7579.sol";
+import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import {IERC721} from "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
+import {IERC1155} from "openzeppelin-contracts/contracts/token/ERC1155/IERC1155.sol";
+import {ERC20} from "openzeppelin-contracts/contracts/token/ERC20/ERC20.sol";
+import {ERC721} from "openzeppelin-contracts/contracts/token/ERC721/ERC721.sol";
+import {ERC1155} from "openzeppelin-contracts/contracts/token/ERC1155/ERC1155.sol";
 
 /// @dev Mock module that responds to isModuleType without reverting.
 contract MockModule is IModule {
@@ -25,28 +31,62 @@ contract NonModuleContract {
     }
 }
 
+contract MockERC20 is ERC20 {
+    constructor() ERC20("MockToken", "MCK") {}
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+}
+
+contract MockERC721 is ERC721 {
+    constructor() ERC721("MockNFT", "MNFT") {}
+
+    function mint(address to, uint256 tokenId) external {
+        _mint(to, tokenId);
+    }
+}
+
+contract MockERC1155 is ERC1155 {
+    constructor() ERC1155("https://mock.uri/{id}") {}
+
+    function mint(address to, uint256 id, uint256 amount) external {
+        _mint(to, id, amount, "");
+    }
+}
+
 contract DefaultSecurityHookBTTTest is Test {
     DefaultSecurityHook public hook;
     MockModule public mockModule;
     NonModuleContract public nonModule;
+    MockERC20 public mockERC20;
+    MockERC721 public mockERC721;
+    MockERC1155 public mockERC1155;
 
     address public account;
     address public randomTarget;
+    address public recipient;
 
-    // Blocked selectors
-    bytes4 internal constant TRANSFER = 0xa9059cbb;
-    bytes4 internal constant APPROVE = 0x095ea7b3;
-    bytes4 internal constant TRANSFER_FROM = 0x23b872dd;
-    bytes4 internal constant INCREASE_ALLOWANCE = 0x39509351;
-    bytes4 internal constant DECREASE_ALLOWANCE = 0xa457c2d7;
-    bytes4 internal constant SAFE_TRANSFER_FROM = 0x42842e0e;
-    bytes4 internal constant SAFE_TRANSFER_FROM_WITH_DATA = 0xb88d4fde;
-    bytes4 internal constant SET_APPROVAL_FOR_ALL = 0xa22cb465;
-    bytes4 internal constant SAFE_TRANSFER_FROM_1155 = 0xf242432a;
-    bytes4 internal constant SAFE_BATCH_TRANSFER_FROM = 0x2eb2c2d6;
+    // Blocked selectors — derived from interfaces
+    // ERC-20
+    bytes4 internal constant TRANSFER = IERC20.transfer.selector;
+    bytes4 internal constant APPROVE = IERC20.approve.selector;
+    bytes4 internal constant TRANSFER_FROM = IERC20.transferFrom.selector;
+    bytes4 internal constant INCREASE_ALLOWANCE = bytes4(keccak256("increaseAllowance(address,uint256)"));
+    bytes4 internal constant DECREASE_ALLOWANCE = bytes4(keccak256("decreaseAllowance(address,uint256)"));
+
+    // ERC-721 (safeTransferFrom is overloaded, so compute from signatures)
+    bytes4 internal constant SAFE_TRANSFER_FROM = bytes4(keccak256("safeTransferFrom(address,address,uint256)"));
+    bytes4 internal constant SAFE_TRANSFER_FROM_WITH_DATA =
+        bytes4(keccak256("safeTransferFrom(address,address,uint256,bytes)"));
+    bytes4 internal constant SET_APPROVAL_FOR_ALL = IERC721.setApprovalForAll.selector;
+
+    // ERC-1155
+    bytes4 internal constant SAFE_TRANSFER_FROM_1155 = IERC1155.safeTransferFrom.selector;
+    bytes4 internal constant SAFE_BATCH_TRANSFER_FROM = IERC1155.safeBatchTransferFrom.selector;
 
     // An unblocked selector
-    bytes4 internal constant BALANCE_OF = 0x70a08231;
+    bytes4 internal constant BALANCE_OF = IERC20.balanceOf.selector;
 
     event AllowlistSet(address indexed account, address indexed target, bytes4[] selectors);
     event AllowlistRemoved(address indexed account, address indexed target);
@@ -57,8 +97,12 @@ contract DefaultSecurityHookBTTTest is Test {
         hook = new DefaultSecurityHook();
         mockModule = new MockModule();
         nonModule = new NonModuleContract();
+        mockERC20 = new MockERC20();
+        mockERC721 = new MockERC721();
+        mockERC1155 = new MockERC1155();
         account = address(0xACC0);
         randomTarget = address(nonModule);
+        recipient = address(0xBEEF);
     }
 
     // ==================== Helper Functions ====================
@@ -242,11 +286,12 @@ contract DefaultSecurityHookBTTTest is Test {
         // it should return empty bytes
         DefaultSecurityHook.AllowlistConfig[] memory configs = new DefaultSecurityHook.AllowlistConfig[](1);
         bytes4[] memory sels = new bytes4[](0);
-        configs[0] = DefaultSecurityHook.AllowlistConfig({target: randomTarget, selectors: sels});
+        configs[0] = DefaultSecurityHook.AllowlistConfig({target: address(mockERC20), selectors: sels});
         _installWithConfig(configs);
 
         // Even a blocked selector should pass when all selectors are allowed
-        bytes memory msgData = _singleMsgData(randomTarget, 0, abi.encodeWithSelector(TRANSFER, address(1), 100));
+        bytes memory callData = abi.encodeCall(IERC20.transfer, (recipient, 100));
+        bytes memory msgData = _singleMsgData(address(mockERC20), 0, callData);
         bytes memory result = _preCheck(msgData);
         assertEq(result, hex"", "Should return empty bytes");
     }
@@ -259,10 +304,11 @@ contract DefaultSecurityHookBTTTest is Test {
         DefaultSecurityHook.AllowlistConfig[] memory configs = new DefaultSecurityHook.AllowlistConfig[](1);
         bytes4[] memory sels = new bytes4[](1);
         sels[0] = TRANSFER;
-        configs[0] = DefaultSecurityHook.AllowlistConfig({target: randomTarget, selectors: sels});
+        configs[0] = DefaultSecurityHook.AllowlistConfig({target: address(mockERC20), selectors: sels});
         _installWithConfig(configs);
 
-        bytes memory msgData = _singleMsgData(randomTarget, 0, abi.encodeWithSelector(TRANSFER, address(1), 100));
+        bytes memory callData = abi.encodeCall(IERC20.transfer, (recipient, 100));
+        bytes memory msgData = _singleMsgData(address(mockERC20), 0, callData);
         bytes memory result = _preCheck(msgData);
         assertEq(result, hex"", "Should return empty bytes");
     }
@@ -272,17 +318,18 @@ contract DefaultSecurityHookBTTTest is Test {
         whenCallingPreCheckWithSINGLEMode
     {
         // it should revert with TokenTransferNotAllowed
-        // Allowlist TRANSFER for the target, but call APPROVE (also blocked)
+        // Allowlist TRANSFER for the token, but call APPROVE (also blocked)
         DefaultSecurityHook.AllowlistConfig[] memory configs = new DefaultSecurityHook.AllowlistConfig[](1);
         bytes4[] memory sels = new bytes4[](1);
         sels[0] = TRANSFER;
-        configs[0] = DefaultSecurityHook.AllowlistConfig({target: randomTarget, selectors: sels});
+        configs[0] = DefaultSecurityHook.AllowlistConfig({target: address(mockERC20), selectors: sels});
         _installWithConfig(configs);
 
-        bytes memory msgData = _singleMsgData(randomTarget, 0, abi.encodeWithSelector(APPROVE, address(1), 100));
+        bytes memory callData = abi.encodeCall(IERC20.approve, (recipient, 100));
+        bytes memory msgData = _singleMsgData(address(mockERC20), 0, callData);
         vm.prank(account);
         vm.expectRevert(
-            abi.encodeWithSelector(DefaultSecurityHook.TokenTransferNotAllowed.selector, randomTarget, APPROVE)
+            abi.encodeWithSelector(DefaultSecurityHook.TokenTransferNotAllowed.selector, address(mockERC20), APPROVE)
         );
         hook.preCheck(address(0), 0, msgData);
     }
@@ -319,10 +366,11 @@ contract DefaultSecurityHookBTTTest is Test {
     function test_GivenSelectorIsERC20Transfer() external whenCallingPreCheckWithSINGLEMode {
         // it should revert with TokenTransferNotAllowed
         _install();
-        bytes memory msgData = _singleMsgData(randomTarget, 0, abi.encodeWithSelector(TRANSFER, address(1), 100));
+        bytes memory callData = abi.encodeCall(IERC20.transfer, (recipient, 100));
+        bytes memory msgData = _singleMsgData(address(mockERC20), 0, callData);
         vm.prank(account);
         vm.expectRevert(
-            abi.encodeWithSelector(DefaultSecurityHook.TokenTransferNotAllowed.selector, randomTarget, TRANSFER)
+            abi.encodeWithSelector(DefaultSecurityHook.TokenTransferNotAllowed.selector, address(mockERC20), TRANSFER)
         );
         hook.preCheck(address(0), 0, msgData);
     }
@@ -330,10 +378,11 @@ contract DefaultSecurityHookBTTTest is Test {
     function test_GivenSelectorIsERC20Approve() external whenCallingPreCheckWithSINGLEMode {
         // it should revert with TokenTransferNotAllowed
         _install();
-        bytes memory msgData = _singleMsgData(randomTarget, 0, abi.encodeWithSelector(APPROVE, address(1), 100));
+        bytes memory callData = abi.encodeCall(IERC20.approve, (recipient, 100));
+        bytes memory msgData = _singleMsgData(address(mockERC20), 0, callData);
         vm.prank(account);
         vm.expectRevert(
-            abi.encodeWithSelector(DefaultSecurityHook.TokenTransferNotAllowed.selector, randomTarget, APPROVE)
+            abi.encodeWithSelector(DefaultSecurityHook.TokenTransferNotAllowed.selector, address(mockERC20), APPROVE)
         );
         hook.preCheck(address(0), 0, msgData);
     }
@@ -341,11 +390,13 @@ contract DefaultSecurityHookBTTTest is Test {
     function test_GivenSelectorIsERC20TransferFrom() external whenCallingPreCheckWithSINGLEMode {
         // it should revert with TokenTransferNotAllowed
         _install();
-        bytes memory msgData =
-            _singleMsgData(randomTarget, 0, abi.encodeWithSelector(TRANSFER_FROM, address(1), address(2), 100));
+        bytes memory callData = abi.encodeCall(IERC20.transferFrom, (account, recipient, 100));
+        bytes memory msgData = _singleMsgData(address(mockERC20), 0, callData);
         vm.prank(account);
         vm.expectRevert(
-            abi.encodeWithSelector(DefaultSecurityHook.TokenTransferNotAllowed.selector, randomTarget, TRANSFER_FROM)
+            abi.encodeWithSelector(
+                DefaultSecurityHook.TokenTransferNotAllowed.selector, address(mockERC20), TRANSFER_FROM
+            )
         );
         hook.preCheck(address(0), 0, msgData);
     }
@@ -353,12 +404,12 @@ contract DefaultSecurityHookBTTTest is Test {
     function test_GivenSelectorIsERC20IncreaseAllowance() external whenCallingPreCheckWithSINGLEMode {
         // it should revert with TokenTransferNotAllowed
         _install();
-        bytes memory msgData =
-            _singleMsgData(randomTarget, 0, abi.encodeWithSelector(INCREASE_ALLOWANCE, address(1), 100));
+        bytes memory callData = abi.encodeWithSelector(INCREASE_ALLOWANCE, recipient, 100);
+        bytes memory msgData = _singleMsgData(address(mockERC20), 0, callData);
         vm.prank(account);
         vm.expectRevert(
             abi.encodeWithSelector(
-                DefaultSecurityHook.TokenTransferNotAllowed.selector, randomTarget, INCREASE_ALLOWANCE
+                DefaultSecurityHook.TokenTransferNotAllowed.selector, address(mockERC20), INCREASE_ALLOWANCE
             )
         );
         hook.preCheck(address(0), 0, msgData);
@@ -367,12 +418,12 @@ contract DefaultSecurityHookBTTTest is Test {
     function test_GivenSelectorIsERC20DecreaseAllowance() external whenCallingPreCheckWithSINGLEMode {
         // it should revert with TokenTransferNotAllowed
         _install();
-        bytes memory msgData =
-            _singleMsgData(randomTarget, 0, abi.encodeWithSelector(DECREASE_ALLOWANCE, address(1), 100));
+        bytes memory callData = abi.encodeWithSelector(DECREASE_ALLOWANCE, recipient, 100);
+        bytes memory msgData = _singleMsgData(address(mockERC20), 0, callData);
         vm.prank(account);
         vm.expectRevert(
             abi.encodeWithSelector(
-                DefaultSecurityHook.TokenTransferNotAllowed.selector, randomTarget, DECREASE_ALLOWANCE
+                DefaultSecurityHook.TokenTransferNotAllowed.selector, address(mockERC20), DECREASE_ALLOWANCE
             )
         );
         hook.preCheck(address(0), 0, msgData);
@@ -381,12 +432,12 @@ contract DefaultSecurityHookBTTTest is Test {
     function test_GivenSelectorIsERC721SafeTransferFrom() external whenCallingPreCheckWithSINGLEMode {
         // it should revert with TokenTransferNotAllowed
         _install();
-        bytes memory msgData =
-            _singleMsgData(randomTarget, 0, abi.encodeWithSelector(SAFE_TRANSFER_FROM, address(1), address(2), 1));
+        bytes memory callData = abi.encodeWithSelector(SAFE_TRANSFER_FROM, account, recipient, 1);
+        bytes memory msgData = _singleMsgData(address(mockERC721), 0, callData);
         vm.prank(account);
         vm.expectRevert(
             abi.encodeWithSelector(
-                DefaultSecurityHook.TokenTransferNotAllowed.selector, randomTarget, SAFE_TRANSFER_FROM
+                DefaultSecurityHook.TokenTransferNotAllowed.selector, address(mockERC721), SAFE_TRANSFER_FROM
             )
         );
         hook.preCheck(address(0), 0, msgData);
@@ -395,13 +446,12 @@ contract DefaultSecurityHookBTTTest is Test {
     function test_GivenSelectorIsERC721SafeTransferFromWithData() external whenCallingPreCheckWithSINGLEMode {
         // it should revert with TokenTransferNotAllowed
         _install();
-        bytes memory msgData = _singleMsgData(
-            randomTarget, 0, abi.encodeWithSelector(SAFE_TRANSFER_FROM_WITH_DATA, address(1), address(2), 1, hex"")
-        );
+        bytes memory callData = abi.encodeWithSelector(SAFE_TRANSFER_FROM_WITH_DATA, account, recipient, 1, hex"");
+        bytes memory msgData = _singleMsgData(address(mockERC721), 0, callData);
         vm.prank(account);
         vm.expectRevert(
             abi.encodeWithSelector(
-                DefaultSecurityHook.TokenTransferNotAllowed.selector, randomTarget, SAFE_TRANSFER_FROM_WITH_DATA
+                DefaultSecurityHook.TokenTransferNotAllowed.selector, address(mockERC721), SAFE_TRANSFER_FROM_WITH_DATA
             )
         );
         hook.preCheck(address(0), 0, msgData);
@@ -410,12 +460,12 @@ contract DefaultSecurityHookBTTTest is Test {
     function test_GivenSelectorIsERC721SetApprovalForAll() external whenCallingPreCheckWithSINGLEMode {
         // it should revert with TokenTransferNotAllowed
         _install();
-        bytes memory msgData =
-            _singleMsgData(randomTarget, 0, abi.encodeWithSelector(SET_APPROVAL_FOR_ALL, address(1), true));
+        bytes memory callData = abi.encodeCall(IERC721.setApprovalForAll, (recipient, true));
+        bytes memory msgData = _singleMsgData(address(mockERC721), 0, callData);
         vm.prank(account);
         vm.expectRevert(
             abi.encodeWithSelector(
-                DefaultSecurityHook.TokenTransferNotAllowed.selector, randomTarget, SET_APPROVAL_FOR_ALL
+                DefaultSecurityHook.TokenTransferNotAllowed.selector, address(mockERC721), SET_APPROVAL_FOR_ALL
             )
         );
         hook.preCheck(address(0), 0, msgData);
@@ -424,13 +474,12 @@ contract DefaultSecurityHookBTTTest is Test {
     function test_GivenSelectorIsERC1155SafeTransferFrom() external whenCallingPreCheckWithSINGLEMode {
         // it should revert with TokenTransferNotAllowed
         _install();
-        bytes memory msgData = _singleMsgData(
-            randomTarget, 0, abi.encodeWithSelector(SAFE_TRANSFER_FROM_1155, address(1), address(2), 1, 1, hex"")
-        );
+        bytes memory callData = abi.encodeCall(IERC1155.safeTransferFrom, (account, recipient, 1, 1, hex""));
+        bytes memory msgData = _singleMsgData(address(mockERC1155), 0, callData);
         vm.prank(account);
         vm.expectRevert(
             abi.encodeWithSelector(
-                DefaultSecurityHook.TokenTransferNotAllowed.selector, randomTarget, SAFE_TRANSFER_FROM_1155
+                DefaultSecurityHook.TokenTransferNotAllowed.selector, address(mockERC1155), SAFE_TRANSFER_FROM_1155
             )
         );
         hook.preCheck(address(0), 0, msgData);
@@ -443,15 +492,13 @@ contract DefaultSecurityHookBTTTest is Test {
         ids[0] = 1;
         uint256[] memory amounts = new uint256[](1);
         amounts[0] = 1;
-        bytes memory msgData = _singleMsgData(
-            randomTarget,
-            0,
-            abi.encodeWithSelector(SAFE_BATCH_TRANSFER_FROM, address(1), address(2), ids, amounts, hex"")
-        );
+        bytes memory callData =
+            abi.encodeCall(IERC1155.safeBatchTransferFrom, (account, recipient, ids, amounts, hex""));
+        bytes memory msgData = _singleMsgData(address(mockERC1155), 0, callData);
         vm.prank(account);
         vm.expectRevert(
             abi.encodeWithSelector(
-                DefaultSecurityHook.TokenTransferNotAllowed.selector, randomTarget, SAFE_BATCH_TRANSFER_FROM
+                DefaultSecurityHook.TokenTransferNotAllowed.selector, address(mockERC1155), SAFE_BATCH_TRANSFER_FROM
             )
         );
         hook.preCheck(address(0), 0, msgData);
@@ -499,41 +546,44 @@ contract DefaultSecurityHookBTTTest is Test {
 
         Execution[] memory execs = new Execution[](2);
         execs[0] = Execution({target: randomTarget, value: 0, callData: abi.encodeWithSelector(BALANCE_OF, address(1))});
-        execs[1] =
-            Execution({target: randomTarget, value: 0, callData: abi.encodeWithSelector(TRANSFER, address(1), 100)});
+        execs[1] = Execution({
+            target: address(mockERC20), value: 0, callData: abi.encodeCall(IERC20.transfer, (recipient, 100))
+        });
 
         bytes memory msgData = _batchMsgData(execs);
         vm.prank(account);
         vm.expectRevert(
-            abi.encodeWithSelector(DefaultSecurityHook.TokenTransferNotAllowed.selector, randomTarget, TRANSFER)
+            abi.encodeWithSelector(DefaultSecurityHook.TokenTransferNotAllowed.selector, address(mockERC20), TRANSFER)
         );
         hook.preCheck(address(0), 0, msgData);
     }
 
     function test_GivenBatchHasAllowlistedAndBlockedCalls() external whenCallingPreCheckWithBATCHMode {
         // it should revert for the blocked call
-        // Allowlist randomTarget but not another target
+        // Allowlist mockERC20 but not mockERC721
         DefaultSecurityHook.AllowlistConfig[] memory configs = new DefaultSecurityHook.AllowlistConfig[](1);
         bytes4[] memory sels = new bytes4[](0);
-        configs[0] = DefaultSecurityHook.AllowlistConfig({target: randomTarget, selectors: sels});
+        configs[0] = DefaultSecurityHook.AllowlistConfig({target: address(mockERC20), selectors: sels});
         _installWithConfig(configs);
 
-        // Use a real non-module contract so isModuleType staticcall reverts
-        NonModuleContract blockedNonModule = new NonModuleContract();
-        address blockedTarget = address(blockedNonModule);
-
         Execution[] memory execs = new Execution[](2);
-        // This call is allowlisted
-        execs[0] =
-            Execution({target: randomTarget, value: 0, callData: abi.encodeWithSelector(TRANSFER, address(1), 100)});
+        // This call is allowlisted (mockERC20 with all selectors)
+        execs[0] = Execution({
+            target: address(mockERC20), value: 0, callData: abi.encodeCall(IERC20.transfer, (recipient, 100))
+        });
         // This call is NOT allowlisted and has a blocked selector
-        execs[1] =
-            Execution({target: blockedTarget, value: 0, callData: abi.encodeWithSelector(APPROVE, address(1), 100)});
+        execs[1] = Execution({
+            target: address(mockERC721),
+            value: 0,
+            callData: abi.encodeCall(IERC721.setApprovalForAll, (recipient, true))
+        });
 
         bytes memory msgData = _batchMsgData(execs);
         vm.prank(account);
         vm.expectRevert(
-            abi.encodeWithSelector(DefaultSecurityHook.TokenTransferNotAllowed.selector, blockedTarget, APPROVE)
+            abi.encodeWithSelector(
+                DefaultSecurityHook.TokenTransferNotAllowed.selector, address(mockERC721), SET_APPROVAL_FOR_ALL
+            )
         );
         hook.preCheck(address(0), 0, msgData);
     }
