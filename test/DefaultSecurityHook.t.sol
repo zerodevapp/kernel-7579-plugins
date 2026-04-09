@@ -184,7 +184,7 @@ contract DefaultSecurityHookBTTTest is Test {
     }
 
     function test_GivenDataContainsTargetsToClean() external whenCallingOnUninstall {
-        // it should clear allowlist entries for each target
+        // it should clear all allowlist entries automatically
         // it should mark account as not initialized
         // it should emit Uninitialized event
         DefaultSecurityHook.AllowlistConfig[] memory configs = new DefaultSecurityHook.AllowlistConfig[](1);
@@ -194,13 +194,10 @@ contract DefaultSecurityHookBTTTest is Test {
 
         assertTrue(hook.isAllowlisted(account, randomTarget), "Should be allowlisted before uninstall");
 
-        address[] memory targets = new address[](1);
-        targets[0] = randomTarget;
-
         vm.prank(account);
         vm.expectEmit(true, false, false, false);
         emit Uninitialized(account);
-        hook.onUninstall(abi.encode(targets));
+        hook.onUninstall("");
 
         assertFalse(hook.isInitialized(account), "Account should not be initialized");
         assertFalse(hook.isAllowlisted(account, randomTarget), "Allowlist should be cleared");
@@ -730,5 +727,132 @@ contract DefaultSecurityHookBTTTest is Test {
         assertFalse(
             hook.isSelectorAllowed(account, randomTarget, APPROVE), "Should return false for non-allowed selector"
         );
+    }
+
+    // ==================== S-01 Regression: Stale selectors cleared on update ====================
+
+    function test_S01_StaleSelectorsAreClearedOnAllowlistUpdate() external {
+        _install();
+
+        // Step 1: Allowlist with TRANSFER and APPROVE
+        bytes4[] memory sels1 = new bytes4[](2);
+        sels1[0] = TRANSFER;
+        sels1[1] = APPROVE;
+        vm.prank(account);
+        hook.setAllowlist(randomTarget, sels1);
+
+        assertTrue(hook.isSelectorAllowed(account, randomTarget, TRANSFER), "TRANSFER should be allowed");
+        assertTrue(hook.isSelectorAllowed(account, randomTarget, APPROVE), "APPROVE should be allowed");
+
+        // Step 2: Update to only TRANSFER
+        bytes4[] memory sels2 = new bytes4[](1);
+        sels2[0] = TRANSFER;
+        vm.prank(account);
+        hook.setAllowlist(randomTarget, sels2);
+
+        // APPROVE must be cleared
+        assertTrue(hook.isSelectorAllowed(account, randomTarget, TRANSFER), "TRANSFER should still be allowed");
+        assertFalse(hook.isSelectorAllowed(account, randomTarget, APPROVE), "APPROVE should be cleared after update");
+    }
+
+    function test_S01_StaleSelectorsAreClearedOnRemoveAllowlist() external {
+        _install();
+
+        // Allowlist with specific selectors
+        bytes4[] memory sels = new bytes4[](1);
+        sels[0] = TRANSFER;
+        vm.prank(account);
+        hook.setAllowlist(randomTarget, sels);
+
+        assertTrue(hook.isSelectorAllowed(account, randomTarget, TRANSFER), "TRANSFER should be allowed");
+
+        // Remove allowlist
+        vm.prank(account);
+        hook.removeAllowlist(randomTarget);
+
+        // Re-add allowlist with different selectors
+        bytes4[] memory sels2 = new bytes4[](1);
+        sels2[0] = APPROVE;
+        vm.prank(account);
+        hook.setAllowlist(randomTarget, sels2);
+
+        // TRANSFER must not persist from the old allowlist
+        assertFalse(
+            hook.isSelectorAllowed(account, randomTarget, TRANSFER), "TRANSFER should not persist after remove+re-add"
+        );
+        assertTrue(hook.isSelectorAllowed(account, randomTarget, APPROVE), "APPROVE should be allowed");
+    }
+
+    // ==================== S-02 Regression: Unknown call types revert ====================
+
+    function test_S02_UnknownCallTypeReverts() external {
+        _install();
+
+        // Build msgData with CALLTYPE_STATICCALL (0xfe)
+        bytes32 mode =
+            LibERC7579.encodeMode(LibERC7579.CALLTYPE_STATICCALL, LibERC7579.EXECTYPE_DEFAULT, bytes4(0), bytes22(0));
+        bytes memory executionData = abi.encodePacked(randomTarget, uint256(0));
+        bytes memory msgData = abi.encodeWithSelector(IERC7579Execution.execute.selector, mode, executionData);
+
+        vm.prank(account);
+        vm.expectRevert(DefaultSecurityHook.UnsupportedCallType.selector);
+        hook.preCheck(address(0), 0, msgData);
+    }
+
+    // ==================== S-03 Regression: onUninstall clears ALL state ====================
+
+    function test_S03_OnUninstallClearsAllTargetsWithoutCallerData() external {
+        // Install with two targets
+        DefaultSecurityHook.AllowlistConfig[] memory configs = new DefaultSecurityHook.AllowlistConfig[](2);
+        bytes4[] memory sels1 = new bytes4[](1);
+        sels1[0] = TRANSFER;
+        configs[0] = DefaultSecurityHook.AllowlistConfig({target: randomTarget, selectors: sels1});
+
+        address target2 = address(0xBEEF);
+        bytes4[] memory sels2 = new bytes4[](0);
+        configs[1] = DefaultSecurityHook.AllowlistConfig({target: target2, selectors: sels2});
+        _installWithConfig(configs);
+
+        assertTrue(hook.isAllowlisted(account, randomTarget), "randomTarget should be allowlisted");
+        assertTrue(hook.isAllowlisted(account, target2), "target2 should be allowlisted");
+
+        // Uninstall with empty data -- should still clear everything
+        vm.prank(account);
+        hook.onUninstall("");
+
+        assertFalse(hook.isAllowlisted(account, randomTarget), "randomTarget should be cleared after uninstall");
+        assertFalse(hook.isAllowlisted(account, target2), "target2 should be cleared after uninstall");
+        assertFalse(
+            hook.isSelectorAllowed(account, randomTarget, TRANSFER),
+            "TRANSFER selector should be cleared after uninstall"
+        );
+    }
+
+    function test_S03_StaleStateDoesNotPersistAcrossReinstall() external {
+        // Install with target allowlisted
+        DefaultSecurityHook.AllowlistConfig[] memory configs1 = new DefaultSecurityHook.AllowlistConfig[](1);
+        bytes4[] memory sels1 = new bytes4[](1);
+        sels1[0] = TRANSFER;
+        configs1[0] = DefaultSecurityHook.AllowlistConfig({target: randomTarget, selectors: sels1});
+        _installWithConfig(configs1);
+
+        assertTrue(hook.isSelectorAllowed(account, randomTarget, TRANSFER), "TRANSFER should be allowed");
+
+        // Uninstall (empty data)
+        vm.prank(account);
+        hook.onUninstall("");
+
+        // Reinstall with different config (APPROVE only)
+        DefaultSecurityHook.AllowlistConfig[] memory configs2 = new DefaultSecurityHook.AllowlistConfig[](1);
+        bytes4[] memory sels2 = new bytes4[](1);
+        sels2[0] = APPROVE;
+        configs2[0] = DefaultSecurityHook.AllowlistConfig({target: randomTarget, selectors: sels2});
+        _installWithConfig(configs2);
+
+        // TRANSFER must NOT persist from the first installation
+        assertFalse(
+            hook.isSelectorAllowed(account, randomTarget, TRANSFER), "TRANSFER should not persist across reinstall"
+        );
+        assertTrue(hook.isSelectorAllowed(account, randomTarget, APPROVE), "APPROVE should be allowed after reinstall");
     }
 }
