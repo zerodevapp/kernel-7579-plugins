@@ -4,6 +4,9 @@ pragma solidity ^0.8.0;
 import {IHook, IModule} from "src/interfaces/IERC7579Modules.sol";
 import {MODULE_TYPE_HOOK} from "src/types/Constants.sol";
 import {LibERC7579} from "solady/accounts/LibERC7579.sol";
+import {IERC20} from "openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import {IERC721} from "openzeppelin-contracts/contracts/token/ERC721/IERC721.sol";
+import {IERC1155} from "openzeppelin-contracts/contracts/token/ERC1155/IERC1155.sol";
 
 /// @title DefaultSecurityHook
 /// @notice A default security hook for ERC-7579 smart accounts that blocks dangerous operations
@@ -50,20 +53,22 @@ contract DefaultSecurityHook is IHook {
     // ========== Blocked Selectors ==========
 
     // ERC-20
-    bytes4 internal constant TRANSFER = 0xa9059cbb;
-    bytes4 internal constant APPROVE = 0x095ea7b3;
-    bytes4 internal constant TRANSFER_FROM = 0x23b872dd;
-    bytes4 internal constant INCREASE_ALLOWANCE = 0x39509351;
-    bytes4 internal constant DECREASE_ALLOWANCE = 0xa457c2d7;
+    bytes4 internal constant TRANSFER = IERC20.transfer.selector;
+    bytes4 internal constant APPROVE = IERC20.approve.selector;
+    bytes4 internal constant TRANSFER_FROM = IERC20.transferFrom.selector;
+    bytes4 internal constant INCREASE_ALLOWANCE = bytes4(keccak256("increaseAllowance(address,uint256)"));
+    bytes4 internal constant DECREASE_ALLOWANCE = bytes4(keccak256("decreaseAllowance(address,uint256)"));
 
     // ERC-721 (unique selectors not already covered above)
-    bytes4 internal constant SAFE_TRANSFER_FROM = 0x42842e0e;
-    bytes4 internal constant SAFE_TRANSFER_FROM_WITH_DATA = 0xb88d4fde;
-    bytes4 internal constant SET_APPROVAL_FOR_ALL = 0xa22cb465;
+    // safeTransferFrom is overloaded in IERC721, so we compute selectors from signatures directly
+    bytes4 internal constant SAFE_TRANSFER_FROM = bytes4(keccak256("safeTransferFrom(address,address,uint256)"));
+    bytes4 internal constant SAFE_TRANSFER_FROM_WITH_DATA =
+        bytes4(keccak256("safeTransferFrom(address,address,uint256,bytes)"));
+    bytes4 internal constant SET_APPROVAL_FOR_ALL = IERC721.setApprovalForAll.selector;
 
     // ERC-1155
-    bytes4 internal constant SAFE_TRANSFER_FROM_1155 = 0xf242432a;
-    bytes4 internal constant SAFE_BATCH_TRANSFER_FROM = 0x2eb2c2d6;
+    bytes4 internal constant SAFE_TRANSFER_FROM_1155 = IERC1155.safeTransferFrom.selector;
+    bytes4 internal constant SAFE_BATCH_TRANSFER_FROM = IERC1155.safeBatchTransferFrom.selector;
 
     // Gas stipend for isModuleType static call
     uint256 internal constant MODULE_CHECK_GAS = 30_000;
