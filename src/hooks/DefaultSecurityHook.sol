@@ -18,6 +18,7 @@ contract DefaultSecurityHook is IHook {
     error ETHTransferNotAllowed(address target, uint256 value);
     error TokenTransferNotAllowed(address target, bytes4 selector);
     error Unauthorized();
+    error UnsupportedCallType();
 
     // ========== Events ==========
 
@@ -36,12 +37,14 @@ contract DefaultSecurityHook is IHook {
     struct AllowlistEntry {
         bool allowed;
         bool allSelectorsAllowed;
+        bytes4[] selectorList;
         mapping(bytes4 => bool) selectors;
     }
 
     // ========== Storage ==========
 
     mapping(address account => mapping(address target => AllowlistEntry)) internal allowlist;
+    mapping(address account => address[]) internal allowlistedTargets;
     mapping(address account => bool) internal initialized;
 
     // ========== Blocked Selectors ==========
@@ -81,15 +84,15 @@ contract DefaultSecurityHook is IHook {
         emit Initialized(msg.sender);
     }
 
-    function onUninstall(bytes calldata data) external payable override {
+    function onUninstall(bytes calldata) external payable override {
         if (!initialized[msg.sender]) revert NotInitialized(msg.sender);
 
-        if (data.length > 0) {
-            address[] memory targets = abi.decode(data, (address[]));
-            for (uint256 i; i < targets.length; i++) {
-                _clearAllowlist(msg.sender, targets[i]);
-            }
+        // Clear ALL allowlisted targets for the account
+        address[] storage targets = allowlistedTargets[msg.sender];
+        for (uint256 i; i < targets.length; i++) {
+            _clearAllowlist(msg.sender, targets[i]);
         }
+        delete allowlistedTargets[msg.sender];
 
         initialized[msg.sender] = false;
         emit Uninitialized(msg.sender);
@@ -131,6 +134,8 @@ contract DefaultSecurityHook is IHook {
                 (address target, uint256 value, bytes calldata data) = LibERC7579.getExecution(pointers, i);
                 _checkCall(target, value, data);
             }
+        } else {
+            revert UnsupportedCallType();
         }
 
         return hex"";
@@ -210,6 +215,19 @@ contract DefaultSecurityHook is IHook {
 
     function _setAllowlist(address account, address target, bytes4[] memory selectors) internal {
         AllowlistEntry storage entry = allowlist[account][target];
+
+        // Track target for cleanup on uninstall (S-03)
+        if (!entry.allowed) {
+            allowlistedTargets[account].push(target);
+        }
+
+        // Clear stale selectors from the mapping (S-01)
+        bytes4[] storage oldSelectors = entry.selectorList;
+        for (uint256 i; i < oldSelectors.length; i++) {
+            entry.selectors[oldSelectors[i]] = false;
+        }
+        delete entry.selectorList;
+
         entry.allowed = true;
         if (selectors.length == 0) {
             entry.allSelectorsAllowed = true;
@@ -217,15 +235,22 @@ contract DefaultSecurityHook is IHook {
             entry.allSelectorsAllowed = false;
             for (uint256 i; i < selectors.length; i++) {
                 entry.selectors[selectors[i]] = true;
+                entry.selectorList.push(selectors[i]);
             }
         }
     }
 
     function _clearAllowlist(address account, address target) internal {
         AllowlistEntry storage entry = allowlist[account][target];
+
+        // Clear all tracked selectors from the mapping
+        bytes4[] storage oldSelectors = entry.selectorList;
+        for (uint256 i; i < oldSelectors.length; i++) {
+            entry.selectors[oldSelectors[i]] = false;
+        }
+        delete entry.selectorList;
+
         entry.allowed = false;
         entry.allSelectorsAllowed = false;
-        // Note: individual selector mappings cannot be fully cleared without knowing the keys.
-        // The `allowed = false` flag prevents any bypasses.
     }
 }
