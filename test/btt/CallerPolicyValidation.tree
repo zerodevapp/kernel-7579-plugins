@@ -1,0 +1,21 @@
+CallerPolicyValidationTest
+├── when installing with empty callers array
+│   └── it should revert with EmptyCallersArray
+├── when installing with callers array containing zero address
+│   └── it should revert with ZeroAddressCaller
+├── when installing with valid callers array
+│   ├── it should set status to Live
+│   └── it should set allowedCaller for each caller
+├── when checking signature policy with sender as allowed caller
+│   └── it should return validation success
+├── when checking signature policy with sender not allowed
+│   └── it should return validation failure
+├── when checking signature policy for non installed account
+│   └── it should return validation failure
+├── when multiple callers are configured
+│   ├── it should allow first caller
+│   ├── it should allow second caller
+│   └── it should reject non-configured caller
+└── when caller is allowed for one account but not another
+    ├── it should pass validation for allowed account
+    └── it should fail validation for non-allowed account

@@ -1,4 +1,0 @@
-ds-test/=lib/kernel_v3/lib/forge-std/lib/ds-test/src/
-forge-std/=lib/forge-std/src/
-kernel/=lib/kernel_v3/src/
-solady/=lib/kernel_v3/lib/solady/src/

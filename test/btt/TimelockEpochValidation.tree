@@ -1,0 +1,75 @@
+TimelockEpochValidationTest
+├── when installing the policy
+│   ├── given it is the first installation
+│   │   ├── it should set currentEpoch to 1
+│   │   └── it should initialize the policy config
+│   ├── given the policy was previously uninstalled
+│   │   ├── it should increment the epoch counter
+│   │   └── it should set currentEpoch to previous epoch plus 1
+│   └── given multiple reinstall cycles occur
+│       ├── it should increment epoch on each install
+│       └── it should track epoch correctly after 3 reinstalls
+├── when creating a proposal
+│   ├── given the policy is installed
+│   │   ├── it should store the current epoch in the proposal
+│   │   └── it should use the epoch from currentEpoch mapping
+│   └── given creating via createProposal function
+│       └── it should record the epoch at creation time
+├── when executing a proposal
+│   ├── given the proposal was created in the current epoch
+│   │   ├── given the timelock has passed
+│   │   │   ├── it should return success validation data
+│   │   │   └── it should mark proposal as executed
+│   │   └── given the proposal is pending
+│   │       └── it should pass epoch validation
+│   ├── given the proposal was created before uninstall and reinstall
+│   │   ├── it should return SIG_VALIDATION_FAILED
+│   │   └── it should not mark proposal as executed
+│   └── given the proposal epoch does not match current epoch
+│       ├── it should reject the stale proposal
+│       └── it should leave proposal status unchanged
+├── when uninstalling and reinstalling the policy
+│   ├── given a proposal exists before uninstall
+│   │   ├── when the policy is uninstalled
+│   │   │   ├── it should delete the policy config
+│   │   │   └── it should preserve the epoch counter
+│   │   └── when the policy is reinstalled
+│   │       ├── it should increment the epoch
+│   │       ├── it should invalidate old proposals implicitly
+│   │       └── it should allow new proposals with new epoch
+│   ├── given multiple proposals exist before uninstall
+│   │   └── when reinstalled and proposals executed
+│   │       ├── it should reject all old proposals
+│   │       └── it should accept new proposals created after reinstall
+│   └── given an attacker tries to execute stale proposal
+│       ├── when proposal was created in epoch 1 and current epoch is 2
+│       │   └── it should fail validation
+│       └── when proposal was created in epoch 2 and current epoch is 5
+│           └── it should fail validation
+├── when epoch is stored per policy ID
+│   ├── given two different policy IDs for same wallet
+│   │   ├── it should track separate epochs for each policy ID
+│   │   └── it should not cross contaminate epochs
+│   └── given same policy ID for different wallets
+│       ├── it should track separate epochs for each wallet
+│       └── it should not affect other wallets epoch on reinstall
+├── when creating new proposals after reinstall
+│   ├── given old proposal exists with old epoch
+│   │   ├── it should allow creating new proposal with same parameters
+│   │   └── it should store new proposal with current epoch
+│   └── given the new proposal is executed
+│       ├── it should succeed because epoch matches
+│       └── it should mark new proposal as executed
+└── when verifying full attack scenario
+    ├── given attacker creates proposal before user uninstalls
+    │   ├── when user uninstalls and reinstalls
+    │   │   ├── when attacker tries to execute old proposal
+    │   │   │   └── it should fail due to epoch mismatch
+    │   │   └── when user creates new proposal with same calldata
+    │   │       └── it should succeed with new epoch
+    │   └── when timelock passes but policy was reinstalled
+    │       └── it should still reject the stale proposal
+    └── given multiple users with same policy
+        └── when one user reinstalls
+            ├── it should only affect that users epoch
+            └── it should not affect other users proposals

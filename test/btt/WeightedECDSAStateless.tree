@@ -1,0 +1,27 @@
+WeightedECDSAStatelessTest
+├── when threshold is zero
+│   └── it should return false
+├── when guardians and weights length mismatch
+│   └── it should return false
+├── when signature count is zero
+│   └── it should return false
+├── when non-last signer is not in sorted order
+│   └── it should return false
+├── when threshold is met before last signature
+│   └── it should return true early
+├── when last signer is not in sorted order
+│   └── it should return false
+├── when last signer has zero weight
+│   └── it should return false
+├── when non-last signer has zero weight
+│   └── it should revert with ZeroWeightSigner
+├── when all signers are valid and threshold is met
+│   └── it should return true
+├── when single signature meets threshold
+│   └── it should return true
+├── when single signature does not meet threshold
+│   └── it should return false
+├── when validating signature with data with sender succeeds
+│   └── it should return true
+└── when validating signature with data with sender fails
+    └── it should return false
