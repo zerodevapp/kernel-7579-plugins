@@ -15,5 +15,11 @@ docs/
 
 coverage/
 lcov.info
+lcov*.info
 log/
 
+# Local verification output
+.certora_internal/
+coverage_*.log
+scratch_*.log
+scratch_*.txt
