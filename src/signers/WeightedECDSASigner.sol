@@ -6,6 +6,7 @@ import {ECDSA} from "solady/utils/ECDSA.sol";
 import {EIP712} from "solady/utils/EIP712.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 import {SignerBase} from "src/base/SignerBase.sol";
+import {WeightedThresholdBase} from "src/base/WeightedThresholdBase.sol";
 import {
     ERC1271_MAGICVALUE,
     ERC1271_INVALID,
@@ -30,12 +31,19 @@ struct GuardianStorage {
     address nextGuardian;
 }
 
-contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatelessValidatorWithSender {
+contract WeightedECDSASigner is
+    EIP712,
+    SignerBase,
+    WeightedThresholdBase,
+    IStatelessValidator,
+    IStatelessValidatorWithSender
+{
     // EIP712 typehash for the Proposal struct
     bytes32 private constant PROPOSAL_TYPEHASH =
         keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce)");
 
     error ZeroWeightSigner();
+    error SignersNotSorted();
     error LengthMismatch();
     error EmptyGuardians();
     error ZeroThreshold();
@@ -43,8 +51,15 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
     error ZeroAddressGuardian();
     error ZeroWeight();
     error GuardianAlreadyEnabled();
-    error SignersNotSorted();
     error ThresholdExceedsTotalWeight();
+
+    function _revertZeroWeightSigner() internal pure override {
+        revert ZeroWeightSigner();
+    }
+
+    function _revertSignersNotSorted() internal pure override {
+        revert SignersNotSorted();
+    }
 
     mapping(bytes32 id => mapping(address kernel => WeightedECDSASignerStorage)) public weightedStorage;
     mapping(address guardian => mapping(bytes32 id => mapping(address kernel => GuardianStorage))) public guardian;
@@ -103,13 +118,34 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         return weightedStorage[id][smartAccount].totalWeight != 0;
     }
 
+    /// @notice Weight lookup for the base aggregation logic (cfg == permission id).
+    function _guardianWeight(bytes32 cfg, address account, address signer) internal view override returns (uint256) {
+        return guardian[signer][cfg][account].weight;
+    }
+
     function checkUserOpSignature(bytes32 id, PackedUserOperation calldata userOp, bytes32 userOpHash)
         external
         payable
         override
         returns (uint256)
     {
-        return _validateUserOpSignature(id, userOp, userOpHash, userOp.signature, msg.sender);
+        // Split signature scheme: first N-1 sigs over the EIP712 proposalHash, last sig over the
+        // RAW userOpHash (ep > 0.7). See WeightedThresholdBase._verifyUserOp.
+        bytes32 proposalHash = _hashTypedData(
+            keccak256(
+                abi.encode(
+                    PROPOSAL_TYPEHASH,
+                    userOp.sender, // account address
+                    id, // id
+                    keccak256(userOp.callData), // calldata hash
+                    userOp.nonce // nonce
+                )
+            )
+        );
+        uint256 threshold = weightedStorage[id][msg.sender].threshold;
+        return _verifyUserOp(id, msg.sender, proposalHash, userOpHash, userOp.signature, threshold)
+            ? SIG_VALIDATION_SUCCESS_UINT
+            : SIG_VALIDATION_FAILED_UINT;
     }
 
     /// @notice Validate an ERC-1271 signature
@@ -124,7 +160,8 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         override
         returns (bytes4)
     {
-        return _validateSignature(id, hash, sig, msg.sender);
+        uint256 threshold = weightedStorage[id][msg.sender].threshold;
+        return _verifySorted(id, msg.sender, hash, sig, threshold) ? ERC1271_MAGICVALUE : ERC1271_INVALID;
     }
 
     function validateSignatureWithData(bytes32 hash, bytes calldata signature, bytes calldata data)
@@ -149,176 +186,10 @@ contract WeightedECDSASigner is EIP712, SignerBase, IStatelessValidator, IStatel
         return _validateStatelessSignature(hash, signature, guardians, weights, threshold);
     }
 
-    // ==================== Internal Shared Logic ====================
-
-    /**
-     * @notice Internal function to validate user operation signatures
-     * @dev Shared logic for both installed and stateless validator modes
-     *
-     *      SECURITY: Split Signature Scheme
-     *      The first N-1 signatures verify a proposalHash (EIP-712 typed data covering
-     *      account, id, callData, and nonce). The last signature MUST verify the full
-     *      userOpHash to bind the complete UserOp (including gas fields).
-     *      This prevents a scenario where guardians approve a proposal but an attacker
-     *      manipulates gas parameters in the final UserOp.
-     *      A double-counting check ensures a guardian who signed both the proposalHash
-     *      and userOpHash only has their weight counted once.
-     */
-    function _validateUserOpSignature(
-        bytes32 id,
-        PackedUserOperation calldata userOp,
-        bytes32 userOpHash,
-        bytes calldata sig,
-        address account
-    ) internal returns (uint256) {
-        WeightedECDSASignerStorage storage strg = weightedStorage[id][account];
-        if (strg.threshold == 0) {
-            return SIG_VALIDATION_FAILED_UINT;
-        }
-
-        // Create EIP712 hash with visible fields: account, id, calldata, nonce
-        bytes32 proposalHash = _hashTypedData(
-            keccak256(
-                abi.encode(
-                    PROPOSAL_TYPEHASH,
-                    userOp.sender, // account address
-                    id, // id
-                    keccak256(userOp.callData), // calldata hash
-                    userOp.nonce // nonce
-                )
-            )
-        );
-
-        if (sig.length % 65 != 0) {
-            return SIG_VALIDATION_FAILED_UINT;
-        }
-
-        uint256 sigCount = sig.length / 65;
-        if (sigCount == 0) {
-            return SIG_VALIDATION_FAILED_UINT;
-        }
-
-        uint256 totalWeight = 0;
-        uint256 threshold = strg.threshold;
-        address signer;
-        address lastSigner = address(0);
-
-        // Track proposalHash signers to prevent double-counting with userOpHash signer
-        address[] memory proposalSigners = new address[](sigCount - 1);
-
-        // Process all signatures except the last one (they sign proposalHash)
-        // Signers must be in strictly ascending order to prevent reuse
-        // NOTE: No early return - must always verify userOpHash signature
-        for (uint256 i = 0; i < sigCount - 1; i++) {
-            signer = ECDSA.tryRecoverCalldata(proposalHash, sig[i * 65:(i + 1) * 65]);
-
-            // Enforce sorted order to prevent signature reuse
-            require(signer > lastSigner, SignersNotSorted());
-            lastSigner = signer;
-            proposalSigners[i] = signer;
-
-            uint24 guardianWeight = guardian[signer][id][account].weight;
-            // Revert if non-last signer has zero weight (prevents gas griefing)
-            if (guardianWeight == 0) {
-                revert ZeroWeightSigner();
-            }
-            totalWeight += guardianWeight;
-            // No early return here - must verify userOpHash signature
-        }
-
-        // Last signature MUST verify userOpHash to bind the full userOp
-        // This prevents malleability of gas fields and other userOp parameters
-        // NOTE: use this with ep > 0.7 only, for ep <= 0.7, need to use toEthSignedMessageHash
-        signer = ECDSA.tryRecoverCalldata(userOpHash, sig[sig.length - 65:]);
-
-        uint24 lastWeight = guardian[signer][id][account].weight;
-        // If last signer has zero weight, return validation failed (don't revert)
-        if (lastWeight == 0) {
-            return SIG_VALIDATION_FAILED_UINT;
-        }
-
-        // Check if userOpHash signer already signed proposalHash (prevent double-counting)
-        bool alreadySigned = false;
-        for (uint256 i = 0; i < proposalSigners.length; i++) {
-            if (proposalSigners[i] == signer) {
-                alreadySigned = true;
-                break;
-            }
-        }
-
-        // Only add weight if signer hasn't already contributed via proposalHash
-        if (!alreadySigned) {
-            totalWeight += lastWeight;
-        }
-
-        if (totalWeight >= threshold) {
-            return SIG_VALIDATION_SUCCESS_UINT;
-        }
-
-        return SIG_VALIDATION_FAILED_UINT;
-    }
-
-    /**
-     * @notice Internal function to validate ERC-1271 signatures
-     * @dev Shared logic for both installed and stateless validator modes
-     */
-    function _validateSignature(bytes32 id, bytes32 hash, bytes calldata sig, address account)
-        internal
-        view
-        returns (bytes4)
-    {
-        WeightedECDSASignerStorage storage strg = weightedStorage[id][account];
-        if (strg.threshold == 0) {
-            return ERC1271_INVALID;
-        }
-
-        uint256 sigCount = sig.length / 65;
-        if (sigCount == 0) {
-            return ERC1271_INVALID;
-        }
-
-        uint256 totalWeight = 0;
-        address signer;
-        address lastSigner = address(0);
-
-        // Process all signatures except the last one
-        for (uint256 i = 0; i < sigCount - 1; i++) {
-            signer = ECDSA.tryRecoverCalldata(hash, sig[i * 65:(i + 1) * 65]);
-
-            // Enforce sorted order to prevent signature reuse
-            if (signer <= lastSigner) {
-                return ERC1271_INVALID;
-            }
-            lastSigner = signer;
-
-            uint24 guardianWeight = guardian[signer][id][account].weight;
-            // Revert if non-last signer has zero weight (prevents gas griefing)
-            if (guardianWeight == 0) {
-                revert ZeroWeightSigner();
-            }
-            totalWeight += guardianWeight;
-            if (totalWeight >= strg.threshold) {
-                return ERC1271_MAGICVALUE;
-            }
-        }
-
-        // Process last signature
-        signer = ECDSA.tryRecoverCalldata(hash, sig[sig.length - 65:]);
-        if (signer <= lastSigner) {
-            return ERC1271_INVALID;
-        }
-        uint24 lastWeight = guardian[signer][id][account].weight;
-        // If last signer has zero weight, return invalid (don't revert)
-        if (lastWeight == 0) {
-            return ERC1271_INVALID;
-        }
-        totalWeight += lastWeight;
-        if (totalWeight >= strg.threshold) {
-            return ERC1271_MAGICVALUE;
-        }
-
-        return ERC1271_INVALID;
-    }
+    // ==================== Stateless (memory-config) validation ====================
+    // The installed/storage-backed paths (checkUserOpSignature / checkSignature) delegate to
+    // WeightedThresholdBase. The stateless paths below use caller-provided memory guardians, which
+    // the base's storage-keyed _guardianWeight cannot serve, so they keep their own implementation.
 
     function _validateStatelessSignature(
         bytes32 hash,
