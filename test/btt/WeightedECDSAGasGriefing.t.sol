@@ -125,11 +125,7 @@ contract WeightedECDSAGasGriefingTest is Test {
         });
     }
 
-    function _signUserOp(PackedUserOperation memory userOp, uint256 numSigners)
-        internal
-        view
-        returns (bytes memory)
-    {
+    function _signUserOp(PackedUserOperation memory userOp, uint256 numSigners) internal view returns (bytes memory) {
         bytes32 proposalHash = _computeProposalHash(userOp);
         bytes32 userOpHash = entrypoint.getUserOpHash(userOp);
 
@@ -497,10 +493,7 @@ contract WeightedECDSAGasGriefingTest is Test {
         assertEq(result, SIG_VALIDATION_SUCCESS_UINT);
     }
 
-    function test_RevertWhen_Non_lastSignersAreNotInSortedOrder()
-        external
-        whenValidatingERC4337UserOp
-    {
+    function test_RevertWhen_Non_lastSignersAreNotInSortedOrder() external whenValidatingERC4337UserOp {
         _installSigner(5);
 
         PackedUserOperation memory userOp = _createUserOp();
@@ -521,9 +514,9 @@ contract WeightedECDSAGasGriefingTest is Test {
 
         userOp.signature = signatures;
 
-        // it should revert with "Signers not sorted"
+        // it should revert with SignersNotSorted
         vm.prank(WALLET);
-        vm.expectRevert("Signers not sorted");
+        vm.expectRevert(WeightedECDSASigner.SignersNotSorted.selector);
         signer.checkUserOpSignature(SIGNER_ID, userOp, userOpHash);
     }
 }

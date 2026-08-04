@@ -212,7 +212,7 @@ contract WeightedECDSADoubleCountTest is Test {
         userOp.signature = abi.encodePacked(sig1, sig2, sig3);
 
         vm.prank(wallet);
-        vm.expectRevert("Signers not sorted");
+        vm.expectRevert(WeightedECDSASigner.SignersNotSorted.selector);
         signer.checkUserOpSignature(SIGNER_ID, userOp, userOpHash);
     }
 
