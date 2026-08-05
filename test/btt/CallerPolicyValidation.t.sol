@@ -34,7 +34,7 @@ contract CallerPolicyValidationTest is Test {
         bytes memory installData = abi.encodePacked(POLICY_ID, abi.encode(emptyCallers));
 
         vm.startPrank(WALLET_1);
-        vm.expectRevert("Empty callers array");
+        vm.expectRevert(CallerPolicy.EmptyCallers.selector);
         policy.onInstall(installData);
         vm.stopPrank();
     }
@@ -47,7 +47,7 @@ contract CallerPolicyValidationTest is Test {
         bytes memory installData = abi.encodePacked(POLICY_ID, abi.encode(callersWithZero));
 
         vm.startPrank(WALLET_1);
-        vm.expectRevert("Zero address caller");
+        vm.expectRevert(CallerPolicy.ZeroAddressCaller.selector);
         policy.onInstall(installData);
         vm.stopPrank();
     }
@@ -196,7 +196,7 @@ contract CallerPolicyValidationTest is Test {
         bytes memory installData = abi.encodePacked(POLICY_ID, abi.encode(callersWithZeroFirst));
 
         vm.startPrank(WALLET_1);
-        vm.expectRevert("Zero address caller");
+        vm.expectRevert(CallerPolicy.ZeroAddressCaller.selector);
         policy.onInstall(installData);
         vm.stopPrank();
     }
@@ -208,7 +208,7 @@ contract CallerPolicyValidationTest is Test {
         bytes memory installData = abi.encodePacked(POLICY_ID, abi.encode(singleZero));
 
         vm.startPrank(WALLET_1);
-        vm.expectRevert("Zero address caller");
+        vm.expectRevert(CallerPolicy.ZeroAddressCaller.selector);
         policy.onInstall(installData);
         vm.stopPrank();
     }

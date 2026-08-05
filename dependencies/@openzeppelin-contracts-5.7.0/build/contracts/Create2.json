@@ -1,0 +1,16 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "Create2",
+  "sourceName": "contracts/utils/Create2.sol",
+  "abi": [
+    {
+      "inputs": [],
+      "name": "Create2EmptyBytecode",
+      "type": "error"
+    }
+  ],
+  "bytecode": "0x60556032600b8282823980515f1a607314602657634e487b7160e01b5f525f60045260245ffd5b305f52607381538281f3fe730000000000000000000000000000000000000000301460806040525f5ffdfea2646970667358221220bf4bb5db5e8837dd8dea2cc9ec82f0ee3863e31c4a57003ffda3d4cd2efdae7e64736f6c63430008230033",
+  "deployedBytecode": "0x730000000000000000000000000000000000000000301460806040525f5ffdfea2646970667358221220bf4bb5db5e8837dd8dea2cc9ec82f0ee3863e31c4a57003ffda3d4cd2efdae7e64736f6c63430008230033",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}

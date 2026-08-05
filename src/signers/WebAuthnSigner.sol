@@ -2,11 +2,18 @@
 
 pragma solidity ^0.8.0;
 
-import "src/base/SignerBase.sol";
-import {SIG_VALIDATION_SUCCESS_UINT, SIG_VALIDATION_FAILED_UINT} from "src/types/Constants.sol";
+import {SignerBase} from "src/base/SignerBase.sol";
+import {IModule, IStatelessValidator, IStatelessValidatorWithSender} from "src/interfaces/IERC7579Modules.sol";
+import {
+    SIG_VALIDATION_SUCCESS_UINT,
+    SIG_VALIDATION_FAILED_UINT,
+    MODULE_TYPE_SIGNER,
+    MODULE_TYPE_STATELESS_VALIDATOR,
+    MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER
+} from "src/types/Constants.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 import {ERC1271_MAGICVALUE, ERC1271_INVALID} from "src/types/Constants.sol";
-import {WebAuthn} from "src/utils/WebAuthn.sol";
+import {WebAuthn} from "solady/utils/WebAuthn.sol";
 
 struct WebAuthnSignerData {
     uint256 pubKeyX;
@@ -17,10 +24,7 @@ struct WebAuthnSignerData {
  * @title WebAuthnSigner
  * @notice This signer uses the P256 curve to validate signatures.
  */
-contract WebAuthnSigner is SignerBase {
-    // The location of the challenge in the clientDataJSON
-    uint256 constant CHALLENGE_LOCATION = 23;
-
+contract WebAuthnSigner is SignerBase, IStatelessValidator, IStatelessValidatorWithSender {
     // Emitted when a bad key is provided.
     error InvalidPublicKey();
 
@@ -30,6 +34,11 @@ contract WebAuthnSigner is SignerBase {
     mapping(address => uint256) public usedIds;
     // The P256 public keys of a kernel.
     mapping(bytes32 id => mapping(address kernel => WebAuthnSignerData)) public webAuthnSignerStorage;
+
+    function isModuleType(uint256 typeID) external pure override(IModule, SignerBase) returns (bool) {
+        return typeID == MODULE_TYPE_SIGNER || typeID == MODULE_TYPE_STATELESS_VALIDATOR
+            || typeID == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
+    }
 
     function isInitialized(address kernel) external view returns (bool) {
         return _isInitialized(kernel);
@@ -48,7 +57,7 @@ contract WebAuthnSigner is SignerBase {
         override
         returns (uint256)
     {
-        return _verifySignature(id, msg.sender, userOpHash, userOp.signature);
+        return _verifySignature(userOpHash, userOp.signature, webAuthnSignerStorage[id][msg.sender]);
     }
 
     /**
@@ -60,45 +69,62 @@ contract WebAuthnSigner is SignerBase {
         override
         returns (bytes4)
     {
-        return _verifySignature(id, msg.sender, hash, sig) == SIG_VALIDATION_SUCCESS_UINT
+        return _verifySignature(hash, sig, webAuthnSignerStorage[id][msg.sender]) == SIG_VALIDATION_SUCCESS_UINT
             ? ERC1271_MAGICVALUE
             : ERC1271_INVALID;
     }
 
+    function validateSignatureWithData(bytes32 hash, bytes calldata signature, bytes calldata data)
+        external
+        view
+        override
+        returns (bool)
+    {
+        return _verifyStatelessSignature(hash, signature, data);
+    }
+
+    function validateSignatureWithDataWithSender(address, bytes32 hash, bytes calldata signature, bytes calldata data)
+        external
+        view
+        override
+        returns (bool)
+    {
+        return _verifyStatelessSignature(hash, signature, data);
+    }
+
     /**
      * @notice Verify a signature.
+     * @dev `signature` is `abi.encode(authenticatorData, clientDataJSON, challengeLocation,
+     *      responseTypeLocation, r, s)`.
+     * @dev Virtual to let formal-verification harnesses model only the cryptographic boundary.
      */
-    function _verifySignature(bytes32 id, address account, bytes32 hash, bytes calldata signature)
-        private
+    function _verifySignature(bytes32 hash, bytes calldata signature, WebAuthnSignerData memory webAuthnData)
+        internal
         view
+        virtual
         returns (uint256)
     {
         // decode the signature
         (
             bytes memory authenticatorData,
             string memory clientDataJSON,
+            uint256 challengeLocation,
             uint256 responseTypeLocation,
             uint256 r,
-            uint256 s,
-            bool usePrecompiled
-        ) = abi.decode(signature, (bytes, string, uint256, uint256, uint256, bool));
+            uint256 s
+        ) = abi.decode(signature, (bytes, string, uint256, uint256, uint256, uint256));
 
-        // get the public key from storage
-        WebAuthnSignerData memory webAuthnData = webAuthnSignerStorage[id][account];
-
-        // verify the signature using the signature and the public key
-        bool isValid = WebAuthn.verifySignature(
+        bool isValid = WebAuthn.verify(
             abi.encodePacked(hash),
-            authenticatorData,
             true,
+            authenticatorData,
             clientDataJSON,
-            CHALLENGE_LOCATION,
+            challengeLocation,
             responseTypeLocation,
-            r,
-            s,
-            webAuthnData.pubKeyX,
-            webAuthnData.pubKeyY,
-            usePrecompiled
+            bytes32(r),
+            bytes32(s),
+            bytes32(webAuthnData.pubKeyX),
+            bytes32(webAuthnData.pubKeyY)
         );
 
         // return the validation data
@@ -106,6 +132,17 @@ contract WebAuthnSigner is SignerBase {
             return SIG_VALIDATION_SUCCESS_UINT;
         }
         return SIG_VALIDATION_FAILED_UINT;
+    }
+
+    function _verifyStatelessSignature(bytes32 hash, bytes calldata signature, bytes calldata data)
+        private
+        view
+        returns (bool)
+    {
+        if (data.length != 96) return false;
+        (WebAuthnSignerData memory webAuthnData,) = abi.decode(data, (WebAuthnSignerData, bytes32));
+        if (webAuthnData.pubKeyX == 0 || webAuthnData.pubKeyY == 0) return false;
+        return _verifySignature(hash, signature, webAuthnData) == SIG_VALIDATION_SUCCESS_UINT;
     }
     /**
      * @notice Install WebAuthn signer for a kernel account.

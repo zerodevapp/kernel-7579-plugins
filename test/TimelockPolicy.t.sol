@@ -118,7 +118,7 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         bytes memory data = abi.encode(uint48(0), uint48(0), address(0));
 
         vm.startPrank(WALLET);
-        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        vm.expectRevert(TimelockPolicy.StatelessValidationNotSupported.selector);
         validatorModule.validateSignatureWithData(message, sig, data);
         vm.stopPrank();
     }
@@ -132,7 +132,7 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         bytes memory validData = abi.encode(delay, expirationPeriod);
 
         vm.startPrank(WALLET);
-        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        vm.expectRevert(TimelockPolicy.StatelessValidationNotSupported.selector);
         validatorModule.validateSignatureWithData(message, sig, validData);
         vm.stopPrank();
     }
@@ -146,7 +146,7 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         bytes memory data = abi.encode(uint48(0), uint48(0), address(0));
 
         vm.startPrank(WALLET);
-        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        vm.expectRevert(TimelockPolicy.StatelessValidationNotSupported.selector);
         validatorModule.validateSignatureWithDataWithSender(caller, message, sig, data);
         vm.stopPrank();
     }
@@ -160,7 +160,7 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         bytes memory validData = abi.encode(delay, expirationPeriod);
 
         vm.startPrank(WALLET);
-        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        vm.expectRevert(TimelockPolicy.StatelessValidationNotSupported.selector);
         validatorModule.validateSignatureWithDataWithSender(caller, message, sig, validData);
         vm.stopPrank();
     }
@@ -233,7 +233,7 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         (address sender, bytes memory sigData) = validSignatureData(testHash);
 
         vm.startPrank(WALLET);
-        vm.expectRevert("TimelockPolicy: signature validation not supported");
+        vm.expectRevert(TimelockPolicy.SignatureValidationNotSupported.selector);
         policyModule.checkSignaturePolicy(policyId(), sender, testHash, sigData);
         vm.stopPrank();
     }
@@ -245,7 +245,7 @@ contract TimelockPolicyTest is PolicyTestBase, StatelessValidatorTestBase, State
         (address sender, bytes memory sigData) = invalidSignatureData(testHash);
 
         vm.startPrank(WALLET);
-        vm.expectRevert("TimelockPolicy: signature validation not supported");
+        vm.expectRevert(TimelockPolicy.SignatureValidationNotSupported.selector);
         policyModule.checkSignaturePolicy(policyId(), sender, testHash, sigData);
         vm.stopPrank();
     }
