@@ -1,0 +1,51 @@
+MultiOwnerValidatorBehaviorTreeTest
+├── when installing the owner registry
+│   ├── when the registry is empty
+│   │   └── it should revert with EmptyOwners
+│   ├── when two entries have the same owner id
+│   │   └── it should revert with OwnerAlreadyExists
+│   └── when entries use different stateless signer modules
+│       ├── it should initialize the account
+│       ├── it should store every signer and validation-data pair
+│       └── it should preserve their owner ids
+├── when administering an initialized registry
+│   ├── when adding a new owner
+│   │   └── it should store the stateless signer configuration and increment owner count
+│   ├── when adding an existing owner id
+│   │   └── it should revert with OwnerAlreadyExists
+│   ├── when adding beyond MAX_OWNERS
+│   │   └── it should revert with MaxOwnersExceeded
+│   ├── when updating an existing owner
+│   │   ├── it should replace the delegated signer configuration immediately
+│   │   └── it should not change owner count
+│   ├── when updating an unknown owner
+│   │   └── it should revert with OwnerDoesNotExist
+│   ├── when removing one of multiple owners
+│   │   ├── it should clear the removed owner
+│   │   ├── it should decrement owner count
+│   │   └── it should keep the enumerable index coherent
+│   ├── when removing the final owner
+│   │   └── it should revert with CannotRemoveLastOwner
+│   └── when uninstalling the registry
+│       └── it should clear every owner and the owner count
+├── when administering an uninitialized registry
+│   ├── when adding an owner
+│   │   └── it should revert with NotInitialized
+│   ├── when updating an owner
+│   │   └── it should revert with NotInitialized
+│   └── when removing an owner
+│       └── it should revert with NotInitialized
+├── when validating a signature
+│   ├── when any registered stateless signer accepts
+│   │   └── it should grant every selected owner equal rights
+│   ├── when the owner id and validation data do not match
+│   │   └── it should return ERC1271_INVALID
+│   ├── when the selected owner has been revoked
+│   │   └── it should return ERC1271_INVALID
+│   ├── when the envelope is malformed, unknown, or the child reverts
+│   │   └── it should return ERC1271_INVALID without reverting
+│   └── when userOp.sender differs from the calling account
+│       └── it should return SIG_VALIDATION_FAILED_UINT
+└── when two accounts use the same owner id
+    ├── it should validate each account against only its own signer data
+    └── it should reject the other account's signer data

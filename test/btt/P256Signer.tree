@@ -1,0 +1,45 @@
+P256SignerTest
+├── when calling isModuleType with MODULE_TYPE_SIGNER
+│   └── it should return true
+├── when calling isModuleType with MODULE_TYPE_STATELESS_VALIDATOR
+│   └── it should return true
+├── when calling isModuleType with MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER
+│   └── it should return true
+├── when calling onInstall with a valid signer id and P256 public key
+│   ├── it should store the public key coordinates for the signer id
+│   └── it should mark the signer id as initialized
+├── when calling onInstall twice with the same signer id
+│   └── it should revert
+├── when calling onInstall with two different signer ids
+│   └── it should initialize both signer ids independently
+├── when calling onInstall with invalid data length
+│   └── it should revert with InvalidDataLength
+├── when calling onInstall with an off-curve public key
+│   └── it should revert with InvalidPublicKey
+├── when calling onUninstall for an initialized signer id
+│   ├── it should clear the public key coordinates
+│   └── it should mark the signer id as uninitialized
+├── when calling checkUserOpSignature with a valid P256 signature
+│   └── it should return SIG_VALIDATION_SUCCESS_UINT
+├── when calling checkUserOpSignature with an invalid P256 signature
+│   └── it should return SIG_VALIDATION_FAILED_UINT
+├── when calling checkUserOpSignature before installation
+│   └── it should return SIG_VALIDATION_FAILED_UINT without reverting
+├── when calling checkSignature with a valid P256 signature
+│   └── it should return ERC1271_MAGICVALUE
+├── when calling checkSignature with an invalid P256 signature
+│   └── it should return ERC1271_INVALID
+├── when calling checkSignature before installation
+│   └── it should return ERC1271_INVALID without reverting
+├── when calling validateSignatureWithData with a valid P256 signature and public key
+│   └── it should return true
+├── when calling validateSignatureWithData with an invalid P256 signature
+│   └── it should return false
+├── when calling validateSignatureWithData with a caller-supplied key before installation
+│   └── it should validate against the supplied key and return true
+├── when calling validateSignatureWithData with a malformed signature
+│   └── it should return false
+├── when calling validateSignatureWithDataWithSender with a valid P256 signature and public key
+│   └── it should return true
+└── when calling validateSignatureWithDataWithSender with an invalid P256 signature
+    └── it should return false

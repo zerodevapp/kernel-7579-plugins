@@ -39,7 +39,7 @@ abstract contract PolicyTestBase is ModuleTestBase {
         _afterInstallCheck(policyId());
     }
 
-    function testPolicyOnInstallFailSameId() public payable {
+    function testPolicyOnInstallFailSameId() public payable virtual {
         IPolicy policyModule = IPolicy(address(module));
         vm.startPrank(WALLET);
         policyModule.onInstall(abi.encodePacked(policyId(), installData()));

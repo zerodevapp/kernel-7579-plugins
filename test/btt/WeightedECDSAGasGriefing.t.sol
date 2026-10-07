@@ -27,6 +27,10 @@ contract WeightedECDSAGasGriefingTest is Test {
 
     address constant WALLET = address(0x1234);
     bytes32 constant SIGNER_ID = keccak256("TEST_SIGNER_ID");
+    bytes32 constant PROPOSAL_TYPEHASH =
+        keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce,uint256 configurationEpoch)");
+    bytes32 constant USER_OP_TYPEHASH =
+        keccak256("WeightedUserOperation(bytes32 userOpHash,uint256 configurationEpoch)");
 
     // Guardians for testing
     address[] guardians;
@@ -88,7 +92,7 @@ contract WeightedECDSAGasGriefingTest is Test {
             abi.encode(
                 keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
                 keccak256("WeightedECDSASigner"),
-                keccak256("0.0.2"),
+                keccak256("0.0.3"),
                 block.chainid,
                 address(signer)
             )
@@ -100,15 +104,31 @@ contract WeightedECDSAGasGriefingTest is Test {
                 domainSeparator,
                 keccak256(
                     abi.encode(
-                        keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce)"),
+                        PROPOSAL_TYPEHASH,
                         userOp.sender,
                         SIGNER_ID,
                         keccak256(userOp.callData),
-                        userOp.nonce
+                        userOp.nonce,
+                        signer.configurationEpoch(SIGNER_ID, WALLET)
                     )
                 )
             )
         );
+    }
+
+    function _computeFinalHash(bytes32 userOpHash) internal view returns (bytes32) {
+        bytes32 domainSeparator = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256("WeightedECDSASigner"),
+                keccak256("0.0.3"),
+                block.chainid,
+                address(signer)
+            )
+        );
+        bytes32 structHash =
+            keccak256(abi.encode(USER_OP_TYPEHASH, userOpHash, signer.configurationEpoch(SIGNER_ID, WALLET)));
+        return keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
     }
 
     function _createUserOp() internal pure returns (PackedUserOperation memory) {
@@ -125,13 +145,10 @@ contract WeightedECDSAGasGriefingTest is Test {
         });
     }
 
-    function _signUserOp(PackedUserOperation memory userOp, uint256 numSigners)
-        internal
-        view
-        returns (bytes memory)
-    {
+    function _signUserOp(PackedUserOperation memory userOp, uint256 numSigners) internal view returns (bytes memory) {
         bytes32 proposalHash = _computeProposalHash(userOp);
         bytes32 userOpHash = entrypoint.getUserOpHash(userOp);
+        bytes32 finalHash = _computeFinalHash(userOpHash);
 
         bytes memory signatures;
 
@@ -141,8 +158,8 @@ contract WeightedECDSAGasGriefingTest is Test {
             signatures = abi.encodePacked(signatures, ri, si, vi);
         }
 
-        // Last signer signs userOpHash
-        (uint8 vLast, bytes32 rLast, bytes32 sLast) = vm.sign(guardianKeys[numSigners - 1], userOpHash);
+        // Last signer signs the epoch-bound full UserOperation hash.
+        (uint8 vLast, bytes32 rLast, bytes32 sLast) = vm.sign(guardianKeys[numSigners - 1], finalHash);
         signatures = abi.encodePacked(signatures, rLast, sLast, vLast);
 
         return signatures;
@@ -334,6 +351,7 @@ contract WeightedECDSAGasGriefingTest is Test {
         PackedUserOperation memory userOp = _createUserOp();
         bytes32 proposalHash = _computeProposalHash(userOp);
         bytes32 userOpHash = entrypoint.getUserOpHash(userOp);
+        bytes32 finalHash = _computeFinalHash(userOpHash);
 
         // Create a non-guardian with a specific private key that gives a low address
         uint256 nonGuardianKey = 0x1234567890abcdef;
@@ -373,7 +391,7 @@ contract WeightedECDSAGasGriefingTest is Test {
             (uint8 vi, bytes32 ri, bytes32 si) = vm.sign(mixedKeys[i], proposalHash);
             signatures = abi.encodePacked(signatures, ri, si, vi);
         }
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mixedKeys[4], userOpHash);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(mixedKeys[4], finalHash);
         signatures = abi.encodePacked(signatures, r, s, v);
 
         userOp.signature = signatures;
@@ -390,6 +408,7 @@ contract WeightedECDSAGasGriefingTest is Test {
         PackedUserOperation memory userOp = _createUserOp();
         bytes32 proposalHash = _computeProposalHash(userOp);
         bytes32 userOpHash = entrypoint.getUserOpHash(userOp);
+        bytes32 finalHash = _computeFinalHash(userOpHash);
 
         // Create a non-guardian that will be last after sorting
         (address nonGuardian, uint256 nonGuardianKey) = makeAddrAndKey("zzz_lastNonGuardian");
@@ -423,7 +442,7 @@ contract WeightedECDSAGasGriefingTest is Test {
             (uint8 vi, bytes32 ri, bytes32 si) = vm.sign(mixedKeys[i], proposalHash);
             signatures = abi.encodePacked(signatures, ri, si, vi);
         }
-        (uint8 vLast, bytes32 rLast, bytes32 sLast) = vm.sign(nonGuardianKey, userOpHash);
+        (uint8 vLast, bytes32 rLast, bytes32 sLast) = vm.sign(nonGuardianKey, finalHash);
         signatures = abi.encodePacked(signatures, rLast, sLast, vLast);
 
         userOp.signature = signatures;
@@ -497,15 +516,13 @@ contract WeightedECDSAGasGriefingTest is Test {
         assertEq(result, SIG_VALIDATION_SUCCESS_UINT);
     }
 
-    function test_RevertWhen_Non_lastSignersAreNotInSortedOrder()
-        external
-        whenValidatingERC4337UserOp
-    {
+    function test_RevertWhen_Non_lastSignersAreNotInSortedOrder() external whenValidatingERC4337UserOp {
         _installSigner(5);
 
         PackedUserOperation memory userOp = _createUserOp();
         bytes32 proposalHash = _computeProposalHash(userOp);
         bytes32 userOpHash = entrypoint.getUserOpHash(userOp);
+        bytes32 finalHash = _computeFinalHash(userOpHash);
 
         // Sign in wrong order: higher address before lower address for proposalHash
         bytes memory signatures;
@@ -516,14 +533,14 @@ contract WeightedECDSAGasGriefingTest is Test {
         (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(guardianKeys[0], proposalHash);
         signatures = abi.encodePacked(signatures, r2, s2, v2);
         // Sign userOpHash with guardian at index 2 last
-        (uint8 v3, bytes32 r3, bytes32 s3) = vm.sign(guardianKeys[2], userOpHash);
+        (uint8 v3, bytes32 r3, bytes32 s3) = vm.sign(guardianKeys[2], finalHash);
         signatures = abi.encodePacked(signatures, r3, s3, v3);
 
         userOp.signature = signatures;
 
-        // it should revert with "Signers not sorted"
+        // it should revert with SignersNotSorted
         vm.prank(WALLET);
-        vm.expectRevert("Signers not sorted");
+        vm.expectRevert(WeightedECDSASigner.SignersNotSorted.selector);
         signer.checkUserOpSignature(SIGNER_ID, userOp, userOpHash);
     }
 }

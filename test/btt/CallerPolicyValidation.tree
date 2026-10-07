@@ -6,6 +6,23 @@ CallerPolicyValidationTest
 ├── when installing with valid callers array
 │   ├── it should set status to Live
 │   └── it should set allowedCaller for each caller
+├── when reinstalling after uninstall with same policy id
+│   ├── it should transition from Deprecated to Live
+│   ├── it should reject the old caller
+│   └── it should allow the new caller
+├── when uninstalling with multiple and duplicate callers
+│   ├── it should clear every caller using only the policy id
+│   ├── it should reject signatures from all removed callers
+│   └── it should reject a second uninstall with PolicyNotLive
+├── when reinstalling while live
+│   └── it should revert with PolicyAlreadyInstalled and preserve the current allowlist
+├── when reinstalling with invalid callers
+│   ├── it should reject empty lists and zero addresses
+│   └── it should remain Deprecated without leaking partially installed callers
+├── when reinstalling with other wallets and policy ids
+│   └── it should preserve their independent allowlists
+├── when rotating callers across repeated installations
+│   └── it should allow only the current caller after each reinstall
 ├── when checking signature policy with sender as allowed caller
 │   └── it should return validation success
 ├── when checking signature policy with sender not allowed

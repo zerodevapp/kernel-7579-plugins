@@ -1,0 +1,20 @@
+WebAuthnStatelessTest
+├── when querying the WebAuthnValidator module types
+│   ├── it should advertise MODULE_TYPE_STATELESS_VALIDATOR
+│   └── it should advertise MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER
+├── when querying the WebAuthnSigner module types
+│   ├── it should advertise MODULE_TYPE_STATELESS_VALIDATOR
+│   └── it should advertise MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER
+├── when calling validateSignatureWithData on WebAuthnValidator before installation
+│   └── it should validate against the caller-supplied public key
+├── when calling validateSignatureWithData on WebAuthnSigner before installation
+│   └── it should validate against the caller-supplied public key
+├── when calling validateSignatureWithDataWithSender with a caller-supplied public key
+│   ├── WebAuthnValidator should return true
+│   └── WebAuthnSigner should return true
+├── when the signed WebAuthn challenge differs from the requested hash
+│   ├── WebAuthnValidator should return false
+│   └── WebAuthnSigner should return false
+└── when calling stateless validation with invalid configuration data
+    ├── WebAuthnValidator should reject malformed data
+    └── WebAuthnSigner should reject zero public-key data

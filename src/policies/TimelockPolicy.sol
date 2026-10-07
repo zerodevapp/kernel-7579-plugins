@@ -3,6 +3,8 @@ pragma solidity ^0.8.0;
 
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 import {IAccountExecute} from "account-abstraction/interfaces/IAccountExecute.sol";
+import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
+import {UserOperationLib} from "account-abstraction/core/UserOperationLib.sol";
 import {IERC7579Execution} from "openzeppelin-contracts/contracts/interfaces/draft-IERC7579.sol";
 import {LibERC7579} from "solady/accounts/LibERC7579.sol";
 import {IModule, IStatelessValidator, IStatelessValidatorWithSender} from "src/interfaces/IERC7579Modules.sol";
@@ -40,6 +42,18 @@ import {
  *      guardian feature, meaning only the account itself can cancel proposals.
  */
 contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorWithSender {
+    using UserOperationLib for PackedUserOperation;
+
+    /// @dev Canonical EntryPoint v0.9 deployment used when legacy install data omits an EntryPoint.
+    address public constant DEFAULT_ENTRYPOINT_V09 = 0x433709009B8330FDa32311DF1C2AFA402eD8D009;
+
+    bytes32 private constant _EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 private constant _ENTRYPOINT_NAME_HASH = keccak256("ERC4337");
+    bytes32 private constant _ENTRYPOINT_VERSION_HASH = keccak256("1");
+    bytes32 private constant _PROPOSAL_COMMITMENT_NAMESPACE =
+        keccak256("kernel.7579.plugins.TimelockPolicy.proposalCommitment");
+
     enum ProposalStatus {
         None, // Proposal doesn't exist
         Pending, // Clock started, waiting for timelock
@@ -67,6 +81,10 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
     // Storage: id => wallet => epoch (persists across uninstall/reinstall)
     mapping(bytes32 => mapping(address => uint256)) public currentEpoch;
 
+    // Storage: id => wallet => EntryPoint v0.9 used by that Kernel account.
+    // Kept separate from TimelockConfig so the existing public getter ABI remains stable.
+    mapping(bytes32 => mapping(address => address)) public configuredEntryPoint;
+
     // Storage: userOpKey => id => wallet => proposal
     // userOpKey = keccak256(abi.encode(account, keccak256(callData), nonce))
     mapping(bytes32 => mapping(bytes32 => mapping(address => Proposal))) public proposals;
@@ -79,6 +97,14 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
     event ProposalCancelled(address indexed wallet, bytes32 indexed id, bytes32 indexed proposalHash);
 
+    event ProposalCommitted(
+        address indexed wallet,
+        bytes32 indexed id,
+        bytes32 indexed proposalHash,
+        bytes32 creationUserOpHash,
+        uint256 epoch
+    );
+
     event TimelockConfigUpdated(
         address indexed wallet, bytes32 indexed id, uint256 delay, uint256 expirationPeriod, address guardian
     );
@@ -90,13 +116,29 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
     error ParametersTooLarge();
     error SignatureValidationNotSupported();
     error StatelessValidationNotSupported();
+    error MissingProposalCommitment();
+    error InvalidInstallData();
+    error InvalidEntryPoint();
+    error UnsupportedCreationInitCode();
 
     /**
      * @notice Install the timelock policy
-     * @param _data Encoded: (uint48 delay, uint48 expirationPeriod, address guardian)
+     * @param _data Legacy encoding: (uint48 delay, uint48 expirationPeriod, address guardian).
+     *              Extended encoding appends an EntryPoint v0.9 address.
      */
     function _policyOninstall(bytes32 id, bytes calldata _data) internal override {
-        (uint48 delay, uint48 expirationPeriod, address guardian) = abi.decode(_data, (uint48, uint48, address));
+        uint48 delay;
+        uint48 expirationPeriod;
+        address guardian;
+        address entryPoint;
+        if (_data.length == 96) {
+            (delay, expirationPeriod, guardian) = abi.decode(_data, (uint48, uint48, address));
+            entryPoint = DEFAULT_ENTRYPOINT_V09;
+        } else if (_data.length == 128) {
+            (delay, expirationPeriod, guardian, entryPoint) = abi.decode(_data, (uint48, uint48, address, address));
+        } else {
+            revert InvalidInstallData();
+        }
 
         if (timelockConfig[id][msg.sender].initialized) {
             revert IModule.AlreadyInitialized(msg.sender);
@@ -104,16 +146,15 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
         if (delay == 0) revert InvalidDelay();
         if (expirationPeriod == 0) revert InvalidExpirationPeriod();
-        // Prevent uint48 overflow: uint48(block.timestamp) + delay + expirationPeriod
-        if (uint256(delay) + uint256(expirationPeriod) > type(uint48).max - block.timestamp) {
-            revert ParametersTooLarge();
-        }
+        if (entryPoint == address(0)) revert InvalidEntryPoint();
+        if (uint256(delay) + uint256(expirationPeriod) > type(uint48).max) revert ParametersTooLarge();
 
         // Increment epoch to invalidate any proposals from previous installations
         currentEpoch[id][msg.sender]++;
 
         timelockConfig[id][msg.sender] =
             TimelockConfig({delay: delay, expirationPeriod: expirationPeriod, guardian: guardian, initialized: true});
+        configuredEntryPoint[id][msg.sender] = entryPoint;
 
         emit TimelockConfigUpdated(msg.sender, id, delay, expirationPeriod, guardian);
     }
@@ -127,15 +168,15 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         }
 
         delete timelockConfig[id][msg.sender];
+        delete configuredEntryPoint[id][msg.sender];
     }
 
     /**
      * @notice Check if this module is a specific type
-     * @dev Supports policy and stateless validator types
+     * @dev Stateless validation is deliberately not advertised: the matching functions always reject.
      */
     function isModuleType(uint256 moduleTypeId) external pure override(IModule, PolicyBase) returns (bool) {
-        return moduleTypeId == MODULE_TYPE_POLICY || moduleTypeId == MODULE_TYPE_STATELESS_VALIDATOR
-            || moduleTypeId == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
+        return moduleTypeId == MODULE_TYPE_POLICY;
     }
 
     /**
@@ -169,9 +210,8 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
     /**
      * @notice Check user operation against timelock policy
-     * @dev Called by the smart account during validation phase
-     *      If calldata is a no-op and signature contains proposal data, creates a proposal
-     *      Otherwise, executes an existing proposal
+     * @dev Called by the smart account during validation. Canonical sponsored creation calldata
+     *      records a one-use commitment; all other calldata must match a pending proposal.
      * @param id The policy ID
      * @param userOp The user operation to validate
      * @return validationData Packed validation data (ERC-4337 format)
@@ -184,55 +224,109 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         override
         returns (uint256)
     {
-        return _validateUserOpPolicy(id, userOp, userOp.signature, msg.sender);
+        return _validateUserOpPolicy(id, userOp, msg.sender);
     }
 
     /**
-     * @notice Handle proposal creation from a no-op UserOp
-     * @dev Called when the session key holder submits a no-op UserOp with proposal data in the signature.
-     *      Creates a new Pending proposal with the timelock clock started.
-     *      Signature format: [callDataLength(32)][callData][nonce(32)][remaining sig data]
+     * @notice Create a proposal during the execution phase of an authenticated creation UserOperation.
+     * @dev The creation call is part of userOp.callData, so the permission signer authenticates every
+     *      proposal field. Validation writes a one-use commitment and requires a paymaster; execution
+     *      consumes it and only then reads block.timestamp to start the full delay.
      */
-    function _handleProposalCreationInternal(
-        bytes32 id,
-        PackedUserOperation calldata userOp,
-        TimelockConfig storage config,
-        bytes calldata sig,
-        address account
-    ) internal returns (uint256) {
-        // Decode proposal data from signature
-        // Format: [callDataLength(32 bytes)][callData][nonce(32 bytes)][...]
-        uint256 callDataLength = uint256(bytes32(sig[0:32]));
+    function createProposal(bytes32 id, bytes calldata proposalCallData, uint256 proposalNonce) external {
+        TimelockConfig storage config = timelockConfig[id][msg.sender];
+        if (!config.initialized) revert IModule.NotInitialized(msg.sender);
 
-        // Validate signature has enough data (check callDataLength first to prevent overflow)
-        if (callDataLength > sig.length || sig.length < 64 + callDataLength) return SIG_VALIDATION_FAILED_UINT;
+        bytes32 userOpKey = keccak256(abi.encode(msg.sender, keccak256(proposalCallData), proposalNonce));
+        uint256 epoch = currentEpoch[id][msg.sender];
+        address entryPoint = configuredEntryPoint[id][msg.sender];
+        if (entryPoint == address(0)) revert InvalidEntryPoint();
+        bytes32 creationUserOpHash = IEntryPoint(entryPoint).getCurrentUserOpHash();
+        if (
+            creationUserOpHash == bytes32(0)
+                || !_consumeProposalCommitment(creationUserOpHash, userOpKey, id, msg.sender, epoch)
+        ) revert MissingProposalCommitment();
 
-        bytes calldata proposalCallData = sig[32:32 + callDataLength];
-        uint256 proposalNonce = uint256(bytes32(sig[32 + callDataLength:64 + callDataLength]));
+        Proposal storage proposal = proposals[userOpKey][id][msg.sender];
+        if (proposal.status != ProposalStatus.None) revert ProposalNotPending();
 
-        // Calculate proposal timing
-        uint48 validAfter = uint48(block.timestamp) + config.delay;
-        uint48 validUntil = validAfter + config.expirationPeriod;
+        uint256 validAfter256 = block.timestamp + uint256(config.delay);
+        uint256 validUntil256 = validAfter256 + uint256(config.expirationPeriod);
+        if (validUntil256 > type(uint48).max) revert ParametersTooLarge();
 
-        // Create userOp key for storage lookup (using PROPOSAL calldata and nonce, not current userOp)
-        bytes32 userOpKey = keccak256(abi.encode(userOp.sender, keccak256(proposalCallData), proposalNonce));
-
-        Proposal storage proposal = proposals[userOpKey][id][account];
-
-        if (proposal.status != ProposalStatus.None) {
-            return SIG_VALIDATION_FAILED_UINT;
-        }
-
-        // Create proposal with current epoch
-        proposals[userOpKey][id][account] = Proposal({
+        proposals[userOpKey][id][msg.sender] = Proposal({
             status: ProposalStatus.Pending,
-            validAfter: validAfter,
-            validUntil: validUntil,
-            epoch: currentEpoch[id][account]
+            validAfter: uint48(validAfter256),
+            validUntil: uint48(validUntil256),
+            epoch: epoch
         });
 
-        emit ProposalCreated(account, id, userOpKey, validAfter, validUntil);
-        return _packValidationData(0, 0);
+        emit ProposalCreated(msg.sender, id, userOpKey, validAfter256, validUntil256);
+    }
+
+    /// @notice Tell DefaultSecurityHook whether a proposal-creation module call is authorized.
+    /// @dev Authorization is live only while EntryPoint executes the exact UserOp that this policy
+    ///      validated. The hook still requires this target and createProposal selector to be
+    ///      explicitly allowlisted by the account.
+    function isProposalCreationAuthorized(address account, bytes calldata createProposalCalldata)
+        external
+        view
+        returns (bytes4 magicValue)
+    {
+        (bool valid, bytes32 id, bytes32 proposalCallDataHash, uint256 proposalNonce) =
+            _decodeCreateProposalCall(createProposalCalldata);
+        if (!valid) return bytes4(0);
+        if (!timelockConfig[id][account].initialized) return bytes4(0);
+        address entryPoint = configuredEntryPoint[id][account];
+        if (entryPoint == address(0)) return bytes4(0);
+
+        if (!_hasLiveProposalCommitment(account, id, proposalCallDataHash, proposalNonce, entryPoint)) {
+            return bytes4(0);
+        }
+        return this.isProposalCreationAuthorized.selector;
+    }
+
+    function _hasLiveProposalCommitment(
+        address account,
+        bytes32 id,
+        bytes32 proposalCallDataHash,
+        uint256 proposalNonce,
+        address entryPoint
+    ) internal view returns (bool) {
+        bytes32 creationUserOpHash;
+        try IEntryPoint(entryPoint).getCurrentUserOpHash() returns (bytes32 currentHash) {
+            creationUserOpHash = currentHash;
+        } catch {
+            return false;
+        }
+        if (creationUserOpHash == bytes32(0)) return false;
+
+        bytes32 userOpKey = keccak256(abi.encode(account, proposalCallDataHash, proposalNonce));
+        bytes32 slot = _proposalCommitmentSlot(creationUserOpHash, userOpKey, id, account);
+        uint256 committedEpoch;
+        assembly ("memory-safe") {
+            committedEpoch := tload(slot)
+        }
+        return committedEpoch == currentEpoch[id][account];
+    }
+
+    /// @notice Canonical Kernel calldata for a sponsored proposal-creation UserOperation.
+    /// @dev EntryPoint v0.9 expands the executeUserOp selector into the full account callback.
+    function getProposalCreationCallData(bytes32 id, bytes calldata proposalCallData, uint256 proposalNonce)
+        external
+        view
+        returns (bytes memory)
+    {
+        bytes32 mode = LibERC7579.encodeMode(
+            LibERC7579.CALLTYPE_SINGLE, LibERC7579.EXECTYPE_DEFAULT, bytes4(0), bytes22(0)
+        );
+        bytes memory inner = abi.encodeCall(this.createProposal, (id, proposalCallData, proposalNonce));
+        return abi.encodePacked(
+            IAccountExecute.executeUserOp.selector,
+            abi.encodeWithSelector(
+                IERC7579Execution.execute.selector, mode, abi.encodePacked(address(this), uint256(0), inner)
+            )
+        );
     }
 
     /**
@@ -261,72 +355,6 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
         emit ProposalExecuted(account, id, userOpKey);
 
         return _packValidationData(proposal.validAfter, proposal.validUntil);
-    }
-
-    /**
-     * @notice Check if calldata is a no-op operation
-     * @dev Recognizes 4 forms of no-op:
-     *      1. Empty calldata
-     *      2. ERC-7579 execute(mode=0x00, abi.encodePacked(address(0), uint256(0))) — single-call, zero-target, zero-value, no inner calldata
-     *      3. executeUserOp + empty inner calldata (just the 4-byte selector)
-     *      4. executeUserOp + ERC-7579 execute no-op (selector + form 2)
-     */
-    function _isNoOpCalldata(bytes calldata callData) internal pure returns (bool) {
-        uint256 len = callData.length;
-
-        // Case 1: Empty calldata
-        if (len == 0) return true;
-
-        // Case 2: ERC-7579 execute with minimal no-op execution data
-        if (_isNoOpERC7579Execute(callData)) return true;
-
-        // Cases 3 & 4: executeUserOp wrapper
-        if (len >= 4 && bytes4(callData[0:4]) == IAccountExecute.executeUserOp.selector) {
-            // Case 3: executeUserOp + empty (just the selector, no inner data)
-            if (len == 4) return true;
-            // Case 4: executeUserOp + ERC-7579 execute no-op
-            if (_isNoOpERC7579Execute(callData[4:])) return true;
-        }
-
-        return false;
-    }
-
-    /**
-     * @notice Check if calldata is an ERC-7579 execute call that performs a zero-value no-op
-     * @dev execute(bytes32 mode, bytes calldata executionCalldata) where:
-     *      - mode is CALLTYPE_SINGLE (not batch/delegatecall)
-     *      - executionCalldata decodes via LibERC7579.decodeSingle() to (address(0), 0, empty)
-     *      - target is address(0) (a non-zero target could trigger receive()/fallback() side effects)
-     *      - value is 0 (no ETH transfer)
-     *      - no inner calldata
-     */
-    function _isNoOpERC7579Execute(bytes calldata callData) internal pure returns (bool) {
-        // Minimum: selector(4) + mode(32) + ABI bytes header: offset(32) + length(32) = 100
-        if (callData.length < 100) return false;
-        if (bytes4(callData[0:4]) != IERC7579Execution.execute.selector) return false;
-
-        // Decode mode and check call type via LibERC7579
-        bytes32 mode = bytes32(callData[4:36]);
-        if (LibERC7579.getCallType(mode) != LibERC7579.CALLTYPE_SINGLE) return false;
-
-        // Extract executionCalldata from ABI-encoded bytes parameter
-        uint256 offset = uint256(bytes32(callData[36:68]));
-        uint256 lenPos = 4 + offset;
-        if (callData.length < lenPos + 32) return false;
-        uint256 dataLen = uint256(bytes32(callData[lenPos:lenPos + 32]));
-        uint256 dataPos = lenPos + 32;
-        if (callData.length < dataPos + dataLen) return false;
-
-        bytes calldata executionCalldata = callData[dataPos:dataPos + dataLen];
-
-        // decodeSingle requires length > 0x33 (target(20) + value(32) minimum)
-        if (executionCalldata.length <= 0x33) return false;
-
-        // Use LibERC7579 to decode — same decoding path the account uses
-        (address target, uint256 val, bytes calldata innerCalldata) = LibERC7579.decodeSingle(executionCalldata);
-
-        // No-op: zero target, zero value, and no inner calldata
-        return target == address(0) && val == 0 && innerCalldata.length == 0;
     }
 
     /**
@@ -373,22 +401,178 @@ contract TimelockPolicy is PolicyBase, IStatelessValidator, IStatelessValidatorW
 
     /**
      * @notice Internal function to validate user operation policy
-     * @dev Shared logic for both installed and stateless validator modes
+     * @dev Shared validation logic for the installed policy path.
      */
-    function _validateUserOpPolicy(bytes32 id, PackedUserOperation calldata userOp, bytes calldata sig, address account)
+    function _validateUserOpPolicy(bytes32 id, PackedUserOperation calldata userOp, address account)
         internal
         returns (uint256)
     {
         TimelockConfig storage config = timelockConfig[id][account];
         if (!config.initialized) return SIG_VALIDATION_FAILED_UINT;
+        if (userOp.sender != account) return SIG_VALIDATION_FAILED_UINT;
 
-        // Check if this is a proposal creation request (no-op calldata with proposal data in sig)
-        if (_isNoOpCalldata(userOp.callData)) {
-            return _handleProposalCreationInternal(id, userOp, config, sig, account);
+        (bool creation, bytes32 creationId, bytes32 proposalCallDataHash, uint256 proposalNonce) =
+            _decodeProposalCreation(userOp.callData);
+        if (creation) {
+            if (creationId != id || !_hasPaymaster(userOp.paymasterAndData)) return SIG_VALIDATION_FAILED_UINT;
+            if (userOp.initCode.length != 0) return SIG_VALIDATION_FAILED_UINT;
+            bytes32 userOpKey = keccak256(abi.encode(account, proposalCallDataHash, proposalNonce));
+            if (proposals[userOpKey][id][account].status != ProposalStatus.None) return SIG_VALIDATION_FAILED_UINT;
+            address entryPoint = configuredEntryPoint[id][account];
+            if (entryPoint == address(0)) return SIG_VALIDATION_FAILED_UINT;
+            bytes32 creationUserOpHash = _entryPointUserOpHash(userOp, entryPoint);
+            uint256 epoch = currentEpoch[id][account];
+            _storeProposalCommitment(creationUserOpHash, userOpKey, id, account, epoch);
+            emit ProposalCommitted(account, id, userOpKey, creationUserOpHash, epoch);
+            return _packValidationData(0, 0);
         }
 
-        // Otherwise, this is a proposal execution request
         return _handleProposalExecutionInternal(id, userOp, account);
+    }
+
+    function _hasPaymaster(bytes calldata paymasterAndData) internal pure returns (bool) {
+        return paymasterAndData.length >= 52 && address(bytes20(paymasterAndData[0:20])) != address(0);
+    }
+
+    /// @notice Compute the exact EntryPoint v0.9 hash used for a proposal-creation UserOperation.
+    /// @dev This is computed locally because ERC-7562 forbids calling EntryPoint.getUserOpHash during validation.
+    function getEntryPointUserOpHash(bytes32 id, address account, PackedUserOperation calldata userOp)
+        external
+        view
+        returns (bytes32)
+    {
+        if (userOp.initCode.length != 0) revert UnsupportedCreationInitCode();
+        address entryPoint = configuredEntryPoint[id][account];
+        if (entryPoint == address(0)) revert InvalidEntryPoint();
+        return _entryPointUserOpHash(userOp, entryPoint);
+    }
+
+    function _entryPointUserOpHash(PackedUserOperation calldata userOp, address entryPoint)
+        internal
+        view
+        returns (bytes32)
+    {
+        bytes32 domainSeparator = keccak256(
+            abi.encode(
+                _EIP712_DOMAIN_TYPEHASH, _ENTRYPOINT_NAME_HASH, _ENTRYPOINT_VERSION_HASH, block.chainid, entryPoint
+            )
+        );
+        return keccak256(abi.encodePacked(hex"1901", domainSeparator, userOp.hash(bytes32(0))));
+    }
+
+    /// @notice Read a transaction-local proposal commitment.
+    /// @dev The signature matches the former mapping getter to keep integrations and tests source-compatible.
+    function proposalCommitments(bytes32 creationUserOpHash, bytes32 userOpKey, bytes32 id, address account)
+        external
+        view
+        returns (uint256 epoch)
+    {
+        bytes32 slot = _proposalCommitmentSlot(creationUserOpHash, userOpKey, id, account);
+        assembly ("memory-safe") {
+            epoch := tload(slot)
+        }
+    }
+
+    function _storeProposalCommitment(
+        bytes32 creationUserOpHash,
+        bytes32 userOpKey,
+        bytes32 id,
+        address account,
+        uint256 epoch
+    ) internal {
+        bytes32 slot = _proposalCommitmentSlot(creationUserOpHash, userOpKey, id, account);
+        assembly ("memory-safe") {
+            tstore(slot, epoch)
+        }
+    }
+
+    function _consumeProposalCommitment(
+        bytes32 creationUserOpHash,
+        bytes32 userOpKey,
+        bytes32 id,
+        address account,
+        uint256 epoch
+    ) internal returns (bool consumed) {
+        bytes32 slot = _proposalCommitmentSlot(creationUserOpHash, userOpKey, id, account);
+        uint256 storedEpoch;
+        assembly ("memory-safe") {
+            storedEpoch := tload(slot)
+        }
+        if (storedEpoch != epoch) return false;
+        assembly ("memory-safe") {
+            tstore(slot, 0)
+        }
+        return true;
+    }
+
+    /// @dev ERC-7562 recognizes an external slot as account-associated only when its outer
+    ///      preimage is exactly `account || bytes32`. Hash every other discriminator into that
+    ///      second word so canonical bundlers permit this shared module's transient access.
+    function _proposalCommitmentSlot(bytes32 creationUserOpHash, bytes32 userOpKey, bytes32 id, address account)
+        internal
+        pure
+        returns (bytes32)
+    {
+        bytes32 subkey = keccak256(abi.encode(_PROPOSAL_COMMITMENT_NAMESPACE, creationUserOpHash, userOpKey, id));
+        return keccak256(abi.encode(account, subkey));
+    }
+
+    /// @dev Decode only the canonical execute(single, policy.createProposal(...)) representation.
+    ///      Every offset, padded length, target and value is checked before any slice is read.
+    function _decodeProposalCreation(bytes calldata callData)
+        internal
+        view
+        returns (bool valid, bytes32 id, bytes32 proposalCallDataHash, uint256 proposalNonce)
+    {
+        if (callData.length < 4 || bytes4(callData[0:4]) != IAccountExecute.executeUserOp.selector) {
+            return (false, 0, 0, 0);
+        }
+        bytes calldata accountCallData = callData[4:];
+        if (accountCallData.length < 100 || bytes4(accountCallData[0:4]) != IERC7579Execution.execute.selector) {
+            return (false, 0, 0, 0);
+        }
+        bytes32 mode = bytes32(accountCallData[4:36]);
+        if (
+            LibERC7579.getCallType(mode) != LibERC7579.CALLTYPE_SINGLE
+                || LibERC7579.getExecType(mode) != LibERC7579.EXECTYPE_DEFAULT
+                || uint256(bytes32(accountCallData[36:68])) != 64
+        ) return (false, 0, 0, 0);
+
+        uint256 executionLength = uint256(bytes32(accountCallData[68:100]));
+        if (executionLength > type(uint256).max - 31) return (false, 0, 0, 0);
+        uint256 paddedExecutionLength = (executionLength + 31) & ~uint256(31);
+        if (paddedExecutionLength != accountCallData.length - 100 || executionLength < 184) return (false, 0, 0, 0);
+
+        bytes calldata executionData = accountCallData[100:100 + executionLength];
+        if (address(bytes20(executionData[0:20])) != address(this) || uint256(bytes32(executionData[20:52])) != 0) {
+            return (false, 0, 0, 0);
+        }
+
+        return _decodeCreateProposalCall(executionData[52:]);
+    }
+
+    /// @dev Decode the one canonical createProposal(bytes32,bytes,uint256) representation used by
+    ///      both UserOp validation and the hook authorization view.
+    function _decodeCreateProposalCall(bytes calldata callData)
+        internal
+        pure
+        returns (bool valid, bytes32 id, bytes32 proposalCallDataHash, uint256 proposalNonce)
+    {
+        if (
+            callData.length < 132 || bytes4(callData[0:4]) != bytes4(keccak256("createProposal(bytes32,bytes,uint256)"))
+        ) {
+            return (false, 0, 0, 0);
+        }
+        if (uint256(bytes32(callData[36:68])) != 96) return (false, 0, 0, 0);
+
+        id = bytes32(callData[4:36]);
+        proposalNonce = uint256(bytes32(callData[68:100]));
+        uint256 proposalLength = uint256(bytes32(callData[100:132]));
+        if (proposalLength > type(uint256).max - 31) return (false, 0, 0, 0);
+        uint256 paddedProposalLength = (proposalLength + 31) & ~uint256(31);
+        if (paddedProposalLength != callData.length - 132) return (false, 0, 0, 0);
+        proposalCallDataHash = keccak256(callData[132:132 + proposalLength]);
+        return (true, id, proposalCallDataHash, proposalNonce);
     }
 
     /**

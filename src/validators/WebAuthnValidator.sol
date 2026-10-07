@@ -2,8 +2,12 @@
 
 pragma solidity ^0.8.0;
 
-import {IValidator, IHook} from "src/interfaces/IERC7579Modules.sol";
-import {MODULE_TYPE_VALIDATOR, MODULE_TYPE_HOOK} from "src/types/Constants.sol";
+import {IValidator, IStatelessValidator, IStatelessValidatorWithSender} from "src/interfaces/IERC7579Modules.sol";
+import {
+    MODULE_TYPE_VALIDATOR,
+    MODULE_TYPE_STATELESS_VALIDATOR,
+    MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER
+} from "src/types/Constants.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 import {
     SIG_VALIDATION_FAILED_UINT,
@@ -11,7 +15,8 @@ import {
     ERC1271_MAGICVALUE,
     ERC1271_INVALID
 } from "src/types/Constants.sol";
-import {WebAuthn} from "src/utils/WebAuthn.sol";
+import {P256Validation} from "src/utils/P256Validation.sol";
+import {WebAuthnValidation} from "src/utils/WebAuthnValidation.sol";
 
 struct WebAuthnValidatorData {
     uint256 pubKeyX;
@@ -22,10 +27,7 @@ struct WebAuthnValidatorData {
  * @title WebAuthnValidator
  * @notice This validator uses the P256 curve to validate signatures.
  */
-contract WebAuthnValidator is IValidator {
-    // The location of the challenge in the clientDataJSON
-    uint256 constant CHALLENGE_LOCATION = 23;
-
+contract WebAuthnValidator is IValidator, IStatelessValidator, IStatelessValidatorWithSender {
     // Emitted when a bad key is provided.
     error InvalidPublicKey();
 
@@ -38,14 +40,15 @@ contract WebAuthnValidator is IValidator {
     /**
      * @notice Install WebAuthn validator for a kernel account.
      * @dev The kernel account need to be the `msg.sender`.
-     * @dev The public key is encoded as `abi.encode(WebAuthnValidatorData)` inside the data, so (uint256,uint256).
+     * @dev `_data` must contain the 96-byte encoding
+     *      `abi.encode(WebAuthnValidatorData(pubKeyX, pubKeyY), bytes32 authenticatorIdHash)`.
      */
     function onInstall(bytes calldata _data) external payable override {
         // check if the webauthn validator is already initialized
         if (_isInitialized(msg.sender)) revert AlreadyInitialized(msg.sender);
         // check validity of the public key
         (WebAuthnValidatorData memory webAuthnData,) = abi.decode(_data, (WebAuthnValidatorData, bytes32));
-        if (webAuthnData.pubKeyX == 0 || webAuthnData.pubKeyY == 0) {
+        if (!P256Validation.isValidPublicKey(webAuthnData.pubKeyX, webAuthnData.pubKeyY)) {
             revert InvalidPublicKey();
         }
         // Update the key (so a sstore)
@@ -63,8 +66,9 @@ contract WebAuthnValidator is IValidator {
         delete webAuthnValidatorStorage[msg.sender];
     }
 
-    function isModuleType(uint256 typeID) external view override returns (bool) {
-        return typeID == MODULE_TYPE_VALIDATOR;
+    function isModuleType(uint256 typeID) external pure override returns (bool) {
+        return typeID == MODULE_TYPE_VALIDATOR || typeID == MODULE_TYPE_STATELESS_VALIDATOR
+            || typeID == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
     }
 
     function isInitialized(address smartAccount) external view returns (bool) {
@@ -72,7 +76,8 @@ contract WebAuthnValidator is IValidator {
     }
 
     function _isInitialized(address smartAccount) internal view returns (bool) {
-        return webAuthnValidatorStorage[smartAccount].pubKeyX != 0;
+        WebAuthnValidatorData storage key = webAuthnValidatorStorage[smartAccount];
+        return key.pubKeyX != 0 || key.pubKeyY != 0;
     }
 
     /**
@@ -84,26 +89,49 @@ contract WebAuthnValidator is IValidator {
         override
         returns (uint256)
     {
-        return _verifySignature(msg.sender, _userOpHash, _userOp.signature);
+        return _verifySignature(_userOpHash, _userOp.signature, webAuthnValidatorStorage[msg.sender]);
     }
 
     /**
      * @notice Verify a signature with sender for ERC-1271 validation.
      */
-    function isValidSignatureWithSender(address sender, bytes32 hash, bytes calldata data)
-        external
-        view
-        returns (bytes4)
-    {
-        return _verifySignature(msg.sender, hash, data) == SIG_VALIDATION_SUCCESS_UINT
+    function isValidSignatureWithSender(address, bytes32 hash, bytes calldata data) external view returns (bytes4) {
+        return _verifySignature(hash, data, webAuthnValidatorStorage[msg.sender]) == SIG_VALIDATION_SUCCESS_UINT
             ? ERC1271_MAGICVALUE
             : ERC1271_INVALID;
     }
 
+    function validateSignatureWithData(bytes32 hash, bytes calldata signature, bytes calldata data)
+        external
+        view
+        override
+        returns (bool)
+    {
+        return _verifyStatelessSignature(hash, signature, data);
+    }
+
+    function validateSignatureWithDataWithSender(address, bytes32 hash, bytes calldata signature, bytes calldata data)
+        external
+        view
+        override
+        returns (bool)
+    {
+        return _verifyStatelessSignature(hash, signature, data);
+    }
+
     /**
      * @notice Verify a signature.
+     * @dev `signature` is the legacy encoding
+     *      `abi.encode(authenticatorData, clientDataJSON, responseTypeLocation, r, s, usePrecompiled)`.
+     *      `usePrecompiled` is retained for ABI compatibility and ignored.
+     * @dev Virtual to let formal-verification harnesses model only the cryptographic boundary.
      */
-    function _verifySignature(address account, bytes32 hash, bytes calldata signature) private view returns (uint256) {
+    function _verifySignature(bytes32 hash, bytes calldata signature, WebAuthnValidatorData memory webAuthnData)
+        internal
+        view
+        virtual
+        returns (uint256)
+    {
         // decode the signature
         (
             bytes memory authenticatorData,
@@ -111,25 +139,18 @@ contract WebAuthnValidator is IValidator {
             uint256 responseTypeLocation,
             uint256 r,
             uint256 s,
-            bool usePrecompiled
+            /* usePrecompiled */
         ) = abi.decode(signature, (bytes, string, uint256, uint256, uint256, bool));
 
-        // get the public key from storage
-        WebAuthnValidatorData memory webAuthnData = webAuthnValidatorStorage[account];
-
-        // verify the signature using the signature and the public key
-        bool isValid = WebAuthn.verifySignature(
-            abi.encodePacked(hash),
+        bool isValid = WebAuthnValidation.verify(
+            hash,
             authenticatorData,
-            true,
             clientDataJSON,
-            CHALLENGE_LOCATION,
             responseTypeLocation,
             r,
             s,
             webAuthnData.pubKeyX,
-            webAuthnData.pubKeyY,
-            usePrecompiled
+            webAuthnData.pubKeyY
         );
 
         // return the validation data
@@ -138,5 +159,16 @@ contract WebAuthnValidator is IValidator {
         }
 
         return SIG_VALIDATION_FAILED_UINT;
+    }
+
+    function _verifyStatelessSignature(bytes32 hash, bytes calldata signature, bytes calldata data)
+        private
+        view
+        returns (bool)
+    {
+        if (data.length != 96) return false;
+        (WebAuthnValidatorData memory webAuthnData,) = abi.decode(data, (WebAuthnValidatorData, bytes32));
+        if (!P256Validation.isValidPublicKey(webAuthnData.pubKeyX, webAuthnData.pubKeyY)) return false;
+        return _verifySignature(hash, signature, webAuthnData) == SIG_VALIDATION_SUCCESS_UINT;
     }
 }

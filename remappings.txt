@@ -1,4 +1,6 @@
-openzeppelin-contracts/contracts/=dependencies/@openzeppelin-contracts-5.5.0/
-account-abstraction/=dependencies/eth-infinitism-account-abstraction-0.8.0/contracts/
-forge-std/=dependencies/forge-std-1.11.0/src/
+openzeppelin-contracts/contracts/=dependencies/@openzeppelin-contracts-5.7.0/
+account-abstraction/=dependencies/eth-infinitism-account-abstraction-0.9.0/contracts/
+forge-std/=dependencies/forge-std-1.16.2/src/
 solady/=dependencies/solady-0.1.26/src/
+halmos-cheatcodes/=dependencies/halmos-cheatcodes/src/
+kontrol-cheatcodes/=dependencies/kontrol-cheatcodes/src/

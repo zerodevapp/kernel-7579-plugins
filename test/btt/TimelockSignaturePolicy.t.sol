@@ -46,7 +46,7 @@ contract TimelockSignaturePolicyTest is Test {
 
         // Try to validate a signature - should always revert
         vm.prank(WALLET);
-        vm.expectRevert("TimelockPolicy: signature validation not supported");
+        vm.expectRevert(TimelockPolicy.SignatureValidationNotSupported.selector);
         timelockPolicy.checkSignaturePolicy(policyId, address(0), testHash, "");
     }
 
@@ -57,7 +57,7 @@ contract TimelockSignaturePolicyTest is Test {
 
         // Try to validate a signature - should always revert
         vm.prank(WALLET);
-        vm.expectRevert("TimelockPolicy: signature validation not supported");
+        vm.expectRevert(TimelockPolicy.SignatureValidationNotSupported.selector);
         timelockPolicy.checkSignaturePolicy(policyId, address(0), testHash, "");
     }
 
@@ -70,7 +70,7 @@ contract TimelockSignaturePolicyTest is Test {
 
         bytes memory data = abi.encode(DELAY, EXPIRATION_PERIOD);
 
-        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        vm.expectRevert(TimelockPolicy.StatelessValidationNotSupported.selector);
         timelockPolicy.validateSignatureWithData(testHash, "", data);
     }
 
@@ -83,7 +83,7 @@ contract TimelockSignaturePolicyTest is Test {
 
         bytes memory data = abi.encode(DELAY, EXPIRATION_PERIOD);
 
-        vm.expectRevert("TimelockPolicy: stateless signature validation not supported");
+        vm.expectRevert(TimelockPolicy.StatelessValidationNotSupported.selector);
         timelockPolicy.validateSignatureWithDataWithSender(WALLET, testHash, "", data);
     }
 }

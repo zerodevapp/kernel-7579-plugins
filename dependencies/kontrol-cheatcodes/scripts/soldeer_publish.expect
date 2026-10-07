@@ -1,0 +1,57 @@
+#!/usr/bin/expect -f
+####################
+# An expect script to handle the manual login and push process for soldeerk
+####################
+
+# Inherit the user's environment
+set env(PATH) $::env(PATH)
+
+# Check if the correct number of arguments is provided
+if { $argc != 2 } {
+    puts "Usage: $argv0 <email> <password>"
+    exit 1
+}
+
+# Assign arguments to variables
+set email [lindex $argv 0]
+set password [lindex $argv 1]
+
+# Command to start the login process
+set command "forge soldeer login"
+
+# Full path to the forge command
+set command "/home/blueeagle/.foundry/bin/forge soldeer login"
+
+# Start the login process
+spawn bash -c "$command"
+
+# Wait for the email prompt and send the email
+expect "Please enter your email:"
+send "$email\r"
+
+# Wait for the password prompt and send the password
+expect "Please enter your password:"
+send "$password\r"
+
+# Wait for the success message
+expect {
+    "Login successful" {
+        puts "Login successful"
+    }
+    "Login failed" {
+        puts "Login failed"
+        exit 1
+    }
+}
+
+# Wait for the end of the interaction
+expect eof
+
+# Command to push after login
+set push_command "forge soldeer push kontrol-cheatcodes~[lindex $argv 2]"
+
+# Start the push process
+spawn bash -c "$push_command"
+
+# Wait for the end of the push interaction
+expect eof

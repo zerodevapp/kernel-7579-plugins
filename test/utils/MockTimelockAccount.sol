@@ -7,6 +7,7 @@ import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOper
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {LibERC7579} from "solady/accounts/LibERC7579.sol";
 import {TimelockPolicy} from "../../src/policies/TimelockPolicy.sol";
+import {ECDSA} from "solady/utils/ECDSA.sol";
 
 /// @title MockTimelockAccount
 /// @notice Minimal ERC-4337 + ERC-7579 account that delegates validation to TimelockPolicy.
@@ -19,22 +20,26 @@ contract MockTimelockAccount is IAccount, IAccountExecute {
     IEntryPoint public immutable entryPoint;
     TimelockPolicy public immutable policy;
     bytes32 public immutable policyId;
+    address public immutable owner;
 
     uint256 public value;
 
     error UnsupportedCallType();
 
-    constructor(IEntryPoint _entryPoint, TimelockPolicy _policy, bytes32 _policyId) {
+    constructor(IEntryPoint _entryPoint, TimelockPolicy _policy, bytes32 _policyId, address _owner) {
         entryPoint = _entryPoint;
         policy = _policy;
         policyId = _policyId;
+        owner = _owner;
     }
 
-    function validateUserOp(PackedUserOperation calldata userOp, bytes32, uint256 missingAccountFunds)
+    function validateUserOp(PackedUserOperation calldata userOp, bytes32 userOpHash, uint256 missingAccountFunds)
         external
         returns (uint256 validationData)
     {
         require(msg.sender == address(entryPoint), "only entrypoint");
+
+        if (ECDSA.tryRecoverCalldata(userOpHash, userOp.signature) != owner) return 1;
 
         if (missingAccountFunds > 0) {
             (bool ok,) = payable(msg.sender).call{value: missingAccountFunds}("");
@@ -42,6 +47,14 @@ contract MockTimelockAccount is IAccount, IAccountExecute {
         }
 
         return policy.checkUserOpPolicy(policyId, userOp);
+    }
+
+    function installPolicy(bytes calldata data) external {
+        policy.onInstall(data);
+    }
+
+    function uninstallPolicy(bytes calldata data) external {
+        policy.onUninstall(data);
     }
 
     /// @notice ERC-7579 execute — only supports single call (CALLTYPE_SINGLE).

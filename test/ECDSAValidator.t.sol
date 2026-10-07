@@ -5,7 +5,7 @@ import {StatelessValidatorTestBase} from "./base/StatelessValidatorTestBase.sol"
 import {StatelessValidatorWithSenderTestBase} from "./base/StatelessValidatorWithSenderTestBase.sol";
 import {ECDSAValidator} from "src/validators/ECDSAValidator.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
-import {IModule, IHook} from "src/interfaces/IERC7579Modules.sol";
+import {IModule} from "src/interfaces/IERC7579Modules.sol";
 import {MODULE_TYPE_HOOK} from "src/types/Constants.sol";
 import "forge-std/console.sol";
 
@@ -78,11 +78,10 @@ contract ECDSAValidatorTest is ValidatorTestBase, StatelessValidatorTestBase, St
         return statelessValidationSignature(hash, valid);
     }
 
-    // Test Hook functionality
-    function testModuleTypeHook() public view {
+    function testModuleTypeHookReturnsFalse() public view {
         ECDSAValidator validatorModule = ECDSAValidator(address(module));
         bool result = validatorModule.isModuleType(MODULE_TYPE_HOOK);
-        assertTrue(result);
+        assertFalse(result);
     }
 
     // Test with ethSignedMessage hash
@@ -125,5 +124,58 @@ contract ECDSAValidatorTest is ValidatorTestBase, StatelessValidatorTestBase, St
         vm.stopPrank();
 
         assertTrue(result);
+    }
+
+    function testStatelessValidationRejectsZeroOwner() public view {
+        ECDSAValidator validatorModule = ECDSAValidator(address(module));
+        bytes memory zeroOwner = new bytes(20);
+
+        assertFalse(validatorModule.validateSignatureWithData(keccak256("hash"), "", zeroOwner));
+        assertFalse(
+            validatorModule.validateSignatureWithDataWithSender(address(0xBEEF), keccak256("hash"), "", zeroOwner)
+        );
+    }
+
+    function testFuzzStatelessValidationRejectsZeroOwner(
+        bytes32 hash,
+        bytes calldata signature,
+        address requestingProtocol
+    ) public view {
+        ECDSAValidator validatorModule = ECDSAValidator(address(module));
+        bytes memory zeroOwner = new bytes(20);
+
+        assertFalse(validatorModule.validateSignatureWithData(hash, signature, zeroOwner));
+        assertFalse(validatorModule.validateSignatureWithDataWithSender(requestingProtocol, hash, signature, zeroOwner));
+    }
+
+    function testFuzzStatelessValidationRejectsEveryNonCanonicalOwnerLength(
+        bytes32 hash,
+        bytes calldata signature,
+        uint8 rawLength
+    ) public view {
+        ECDSAValidator validatorModule = ECDSAValidator(address(module));
+        uint256 length = bound(uint256(rawLength), 0, 64);
+        if (length == 20) length = 21;
+        bytes memory malformedOwner = new bytes(length);
+
+        assertFalse(validatorModule.validateSignatureWithData(hash, signature, malformedOwner));
+        assertFalse(
+            validatorModule.validateSignatureWithDataWithSender(address(0xBEEF), hash, signature, malformedOwner)
+        );
+    }
+
+    function testStatelessValidationRejectsNonCanonicalOwnerDataLength() public view {
+        ECDSAValidator validatorModule = ECDSAValidator(address(module));
+        bytes32 hash = keccak256("hash");
+        (, bytes memory signature) = erc1271Signature(hash, true);
+        bytes memory dataTooShort = new bytes(19);
+        bytes memory dataWithTrailingByte = abi.encodePacked(owner, bytes1(0x01));
+
+        assertFalse(validatorModule.validateSignatureWithData(hash, signature, dataTooShort));
+        assertFalse(validatorModule.validateSignatureWithData(hash, signature, dataWithTrailingByte));
+        assertFalse(validatorModule.validateSignatureWithDataWithSender(address(0xBEEF), hash, signature, dataTooShort));
+        assertFalse(
+            validatorModule.validateSignatureWithDataWithSender(address(0xBEEF), hash, signature, dataWithTrailingByte)
+        );
     }
 }

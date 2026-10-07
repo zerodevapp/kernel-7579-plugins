@@ -26,6 +26,7 @@ import {
  * @dev This policy validates the REQUESTING PROTOCOL (sender), not the actual signer.
  *      Use case: Only allow specific protocols (e.g., Permit2, Uniswap) to request signatures.
  *      If you need to validate who signed, use a signer module instead.
+ *      Uninstall clears the allowlist so the same policy ID can be reinstalled with new callers.
  */
 contract CallerPolicy is PolicyBase, IStatelessValidatorWithSender {
     error PolicyAlreadyInstalled();
@@ -36,6 +37,8 @@ contract CallerPolicy is PolicyBase, IStatelessValidatorWithSender {
     mapping(bytes32 id => mapping(address => Status)) public status;
     /// @notice Maps policy ID => requesting protocol => wallet => whether protocol is allowed
     mapping(bytes32 id => mapping(address caller => mapping(address wallet => bool))) public allowedCaller;
+    /// @dev Retains the caller list for cleanup without requiring it in uninstall data.
+    mapping(bytes32 id => mapping(address wallet => address[])) internal _callers;
 
     function isModuleType(uint256 typeID) external pure override(IModule, PolicyBase) returns (bool) {
         return typeID == MODULE_TYPE_POLICY || typeID == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
@@ -87,18 +90,24 @@ contract CallerPolicy is PolicyBase, IStatelessValidatorWithSender {
     }
 
     function _policyOninstall(bytes32 id, bytes calldata _data) internal override {
-        require(status[id][msg.sender] == Status.NA, PolicyAlreadyInstalled());
+        require(status[id][msg.sender] != Status.Live, PolicyAlreadyInstalled());
         address[] memory callers = abi.decode(_data, (address[]));
         require(callers.length > 0, EmptyCallers());
         for (uint256 i = 0; i < callers.length; i++) {
             require(callers[i] != address(0), ZeroAddressCaller());
             allowedCaller[id][callers[i]][msg.sender] = true;
         }
+        _callers[id][msg.sender] = callers;
         status[id][msg.sender] = Status.Live;
     }
 
-    function _policyOnUninstall(bytes32 id, bytes calldata _data) internal override {
+    function _policyOnUninstall(bytes32 id, bytes calldata) internal override {
         require(status[id][msg.sender] == Status.Live, PolicyNotLive());
+        address[] storage callers = _callers[id][msg.sender];
+        for (uint256 i = 0; i < callers.length; i++) {
+            delete allowedCaller[id][callers[i]][msg.sender];
+        }
+        delete _callers[id][msg.sender];
         status[id][msg.sender] = Status.Deprecated;
     }
 
