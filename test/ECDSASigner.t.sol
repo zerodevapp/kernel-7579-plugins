@@ -67,4 +67,55 @@ contract ECDSASignerTest is SignerTestBase, StatelessValidatorTestBase, Stateles
     {
         return erc1271Signature(hash, valid);
     }
+
+    function testStatelessValidationRejectsZeroSigner() public view {
+        ECDSASigner signerModule = ECDSASigner(address(module));
+        bytes memory zeroSigner = new bytes(20);
+
+        assertFalse(signerModule.validateSignatureWithData(keccak256("hash"), "", zeroSigner));
+        assertFalse(
+            signerModule.validateSignatureWithDataWithSender(address(0xBEEF), keccak256("hash"), "", zeroSigner)
+        );
+    }
+
+    function testFuzzStatelessValidationRejectsZeroSigner(
+        bytes32 hash,
+        bytes calldata signature,
+        address requestingProtocol
+    ) public view {
+        ECDSASigner signerModule = ECDSASigner(address(module));
+        bytes memory zeroSigner = new bytes(20);
+
+        assertFalse(signerModule.validateSignatureWithData(hash, signature, zeroSigner));
+        assertFalse(signerModule.validateSignatureWithDataWithSender(requestingProtocol, hash, signature, zeroSigner));
+    }
+
+    function testFuzzStatelessValidationRejectsEveryNonCanonicalSignerLength(
+        bytes32 hash,
+        bytes calldata signature,
+        uint8 rawLength
+    ) public view {
+        ECDSASigner signerModule = ECDSASigner(address(module));
+        uint256 length = bound(uint256(rawLength), 0, 64);
+        if (length == 20) length = 21;
+        bytes memory malformedSigner = new bytes(length);
+
+        assertFalse(signerModule.validateSignatureWithData(hash, signature, malformedSigner));
+        assertFalse(signerModule.validateSignatureWithDataWithSender(address(0xBEEF), hash, signature, malformedSigner));
+    }
+
+    function testStatelessValidationRejectsNonCanonicalSignerDataLength() public view {
+        ECDSASigner signerModule = ECDSASigner(address(module));
+        bytes32 hash = keccak256("hash");
+        (, bytes memory signature) = erc1271Signature(hash, true);
+        bytes memory dataTooShort = new bytes(19);
+        bytes memory dataWithTrailingByte = abi.encodePacked(owner, bytes1(0x01));
+
+        assertFalse(signerModule.validateSignatureWithData(hash, signature, dataTooShort));
+        assertFalse(signerModule.validateSignatureWithData(hash, signature, dataWithTrailingByte));
+        assertFalse(signerModule.validateSignatureWithDataWithSender(address(0xBEEF), hash, signature, dataTooShort));
+        assertFalse(
+            signerModule.validateSignatureWithDataWithSender(address(0xBEEF), hash, signature, dataWithTrailingByte)
+        );
+    }
 }

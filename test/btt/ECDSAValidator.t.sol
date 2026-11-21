@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import {Test} from "forge-std/Test.sol";
 import {ECDSA} from "solady/utils/ECDSA.sol";
 import {ECDSAValidator} from "src/validators/ECDSAValidator.sol";
-import {IValidator, IHook, IModule} from "src/interfaces/IERC7579Modules.sol";
+import {IValidator, IModule} from "src/interfaces/IERC7579Modules.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 import {IEntryPoint} from "account-abstraction/interfaces/IEntryPoint.sol";
 import {EntryPointLib} from "../utils/EntryPointLib.sol";
@@ -77,9 +77,9 @@ contract ECDSAValidatorBTTTest is Test {
     }
 
     function test_WhenCallingIsModuleTypeWithMODULE_TYPE_HOOK() external view {
-        // it should return true
+        // it should return false because this validator does not implement the hook lifecycle
         bool result = ecdsaValidator.isModuleType(MODULE_TYPE_HOOK);
-        assertTrue(result, "Should return true for MODULE_TYPE_HOOK");
+        assertFalse(result, "Should return false for MODULE_TYPE_HOOK");
     }
 
     function test_WhenCallingIsModuleTypeWithMODULE_TYPE_STATELESS_VALIDATOR() external view {
@@ -352,41 +352,6 @@ contract ECDSAValidatorBTTTest is Test {
         assertFalse(result, "Should return false for invalid signature");
     }
 
-    // ==================== preCheck Tests ====================
-
-    function test_WhenCallingPreCheckWithMsgSenderNotTheOwner() external {
-        // it should revert with sender is not owner
-        _installValidator();
-
-        address notOwner = address(0x9999);
-
-        vm.startPrank(wallet);
-        vm.expectRevert("ECDSAValidator: sender is not owner");
-        ecdsaValidator.preCheck(notOwner, 0, "");
-        vm.stopPrank();
-    }
-
-    function test_WhenCallingPreCheckWithMsgSenderAsTheOwner() external {
-        // it should return empty bytes
-        _installValidator();
-
-        vm.prank(wallet);
-        bytes memory result = ecdsaValidator.preCheck(owner, 0, "");
-        assertEq(result, hex"", "Should return empty bytes");
-    }
-
-    // ==================== postCheck Tests ====================
-
-    function test_WhenCallingPostCheckWithAnyHookData() external {
-        // it should complete without reverting
-        // postCheck is a no-op function that should never revert
-        ecdsaValidator.postCheck(hex"1234");
-        ecdsaValidator.postCheck("");
-        ecdsaValidator.postCheck(abi.encodePacked("some data"));
-        // If we reach here without reverting, the test passes
-        assertTrue(true, "postCheck should complete without reverting");
-    }
-
     function test_WhenCallingValidateUserOpWithSignatureMatchingViaFirstBranch() external {
         // it should return SIG_VALIDATION_SUCCESS_UINT via raw hash match
         // This tests the first branch: if (signer == ECDSA.tryRecoverCalldata(hash, sig)) return true;
@@ -440,9 +405,7 @@ contract ECDSAValidatorBTTTest is Test {
         vm.prank(wallet);
         uint256 result = ecdsaValidator.validateUserOp(userOp, userOpHash);
         assertEq(
-            result,
-            SIG_VALIDATION_FAILED_UINT,
-            "Should return SIG_VALIDATION_FAILED_UINT after both branches fail"
+            result, SIG_VALIDATION_FAILED_UINT, "Should return SIG_VALIDATION_FAILED_UINT after both branches fail"
         );
     }
 

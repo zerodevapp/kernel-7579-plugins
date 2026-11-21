@@ -1,0 +1,145 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import {ValidatorTestBase} from "test/base/ValidatorTestBase.sol";
+import {StatelessValidatorTestBase} from "test/base/StatelessValidatorTestBase.sol";
+import {StatelessValidatorWithSenderTestBase} from "test/base/StatelessValidatorWithSenderTestBase.sol";
+import {P256Validator} from "src/validators/P256Validator.sol";
+import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
+import {IModule, IValidator, IStatelessValidator} from "src/interfaces/IERC7579Modules.sol";
+import {SIG_VALIDATION_FAILED_UINT, ERC1271_INVALID} from "src/types/Constants.sol";
+
+contract P256ValidatorTest is ValidatorTestBase, StatelessValidatorTestBase, StatelessValidatorWithSenderTestBase {
+    uint256 internal constant P256_N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551;
+    uint256 internal constant PRIVATE_KEY = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
+
+    uint256 internal pubKeyX;
+    uint256 internal pubKeyY;
+
+    function deployModule() internal override returns (IModule) {
+        return new P256Validator();
+    }
+
+    function _initializeTest() internal override {
+        (pubKeyX, pubKeyY) = vm.publicKeyP256(PRIVATE_KEY);
+    }
+
+    function installData() internal view override returns (bytes memory) {
+        return abi.encode(pubKeyX, pubKeyY);
+    }
+
+    function userOpSignature(PackedUserOperation memory userOp, bool valid)
+        internal
+        view
+        override
+        returns (bytes memory)
+    {
+        bytes32 hash = ENTRYPOINT.getUserOpHash(userOp);
+        return _signature(valid ? hash : keccak256(abi.encodePacked("invalid", hash)), PRIVATE_KEY);
+    }
+
+    function erc1271Signature(bytes32 hash, bool valid) internal pure override returns (address, bytes memory) {
+        return (address(0), _signature(valid ? hash : keccak256(abi.encodePacked("invalid", hash)), PRIVATE_KEY));
+    }
+
+    function statelessValidationSignature(bytes32 hash, bool valid)
+        internal
+        pure
+        override
+        returns (address, bytes memory)
+    {
+        return erc1271Signature(hash, valid);
+    }
+
+    function statelessValidationSignatureWithSender(bytes32 hash, bool valid)
+        internal
+        pure
+        override
+        returns (address, bytes memory)
+    {
+        return erc1271Signature(hash, valid);
+    }
+
+    function _afterInstallCheck() internal view override {
+        (uint256 x, uint256 y) = P256Validator(address(module)).p256ValidatorStorage(WALLET);
+        assertEq(x, pubKeyX);
+        assertEq(y, pubKeyY);
+        assertTrue(P256Validator(address(module)).isInitialized(WALLET));
+    }
+
+    function _afterUninstallCheck() internal view override {
+        (uint256 x, uint256 y) = P256Validator(address(module)).p256ValidatorStorage(WALLET);
+        assertEq(x, 0);
+        assertEq(y, 0);
+        assertFalse(P256Validator(address(module)).isInitialized(WALLET));
+    }
+
+    function testOnInstallRejectsInvalidLength() public {
+        vm.prank(WALLET);
+        vm.expectRevert(P256Validator.InvalidDataLength.selector);
+        IValidator(address(module)).onInstall(hex"01");
+    }
+
+    function testOnInstallRejectsOffCurveKey() public {
+        vm.prank(WALLET);
+        vm.expectRevert(P256Validator.InvalidPublicKey.selector);
+        IValidator(address(module)).onInstall(abi.encode(uint256(0), uint256(1)));
+    }
+
+    function testUninitializedValidationFailsWithoutReverting() public {
+        PackedUserOperation memory userOp;
+        userOp.sender = WALLET;
+        userOp.signature = _signature(bytes32(uint256(1)), PRIVATE_KEY);
+
+        vm.prank(WALLET);
+        assertEq(IValidator(address(module)).validateUserOp(userOp, bytes32(uint256(1))), SIG_VALIDATION_FAILED_UINT);
+
+        vm.prank(WALLET);
+        assertEq(
+            IValidator(address(module)).isValidSignatureWithSender(address(0), bytes32(uint256(1)), userOp.signature),
+            ERC1271_INVALID
+        );
+    }
+
+    function testMalformedSignatureFailsWithoutReverting() public {
+        vm.prank(WALLET);
+        IValidator(address(module)).onInstall(installData());
+
+        vm.prank(WALLET);
+        assertEq(
+            IValidator(address(module)).isValidSignatureWithSender(address(0), bytes32(uint256(1)), hex"01"),
+            ERC1271_INVALID
+        );
+    }
+
+    function testStatelessValidationUsesSuppliedKeyWithoutInstall() public view {
+        uint256 otherKey = PRIVATE_KEY + 1;
+        (uint256 otherX, uint256 otherY) = vm.publicKeyP256(otherKey);
+        bytes32 hash = keccak256("stateless P256 validator");
+
+        assertTrue(
+            IStatelessValidator(address(module))
+                .validateSignatureWithData(hash, _signature(hash, otherKey), abi.encode(otherX, otherY))
+        );
+    }
+
+    function testStatelessValidationRejectsMalformedConfig() public view {
+        assertFalse(IStatelessValidator(address(module)).validateSignatureWithData(bytes32(uint256(1)), hex"", hex"01"));
+    }
+
+    function testHighSValueIsRejected() public view {
+        bytes32 hash = keccak256("high s");
+        (bytes32 r, bytes32 s) = vm.signP256(PRIVATE_KEY, hash);
+        uint256 normalizedS = uint256(s) > P256_N / 2 ? P256_N - uint256(s) : uint256(s);
+        bytes memory highSignature = abi.encode(r, bytes32(P256_N - normalizedS));
+
+        assertFalse(IStatelessValidator(address(module)).validateSignatureWithData(hash, highSignature, installData()));
+    }
+
+    function _signature(bytes32 hash, uint256 privateKey) internal pure returns (bytes memory) {
+        (bytes32 r, bytes32 s) = vm.signP256(privateKey, hash);
+        uint256 normalizedS = uint256(s);
+        if (normalizedS > P256_N / 2) normalizedS = P256_N - normalizedS;
+        return abi.encode(r, bytes32(normalizedS));
+    }
+}

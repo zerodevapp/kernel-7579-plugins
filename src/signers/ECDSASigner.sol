@@ -28,6 +28,7 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
     }
 
     function _verifySignature(bytes32 hash, bytes calldata sig, address _signer) internal view returns (bool) {
+        if (_signer == address(0)) return false;
         if (_signer == ECDSA.tryRecoverCalldata(hash, sig)) {
             return true;
         }
@@ -87,7 +88,9 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
         override(IStatelessValidator)
         returns (bool)
     {
-        return _verifySignature(hash, signature, address(bytes20(data[0:20])));
+        if (data.length != 20) return false;
+        address statelessSigner = address(bytes20(data[0:20]));
+        return _verifySignature(hash, signature, statelessSigner);
     }
 
     function validateSignatureWithDataWithSender(address, bytes32 hash, bytes calldata signature, bytes calldata data)
@@ -96,6 +99,8 @@ contract ECDSASigner is SignerBase, IStatelessValidator, IStatelessValidatorWith
         override(IStatelessValidatorWithSender)
         returns (bool)
     {
-        return _verifySignature(hash, signature, address(bytes20(data[0:20])));
+        if (data.length != 20) return false;
+        address statelessSigner = address(bytes20(data[0:20]));
+        return _verifySignature(hash, signature, statelessSigner);
     }
 }

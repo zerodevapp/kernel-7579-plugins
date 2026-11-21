@@ -56,7 +56,7 @@ contract WeightedECDSAInstallTest is Test {
 
         // it should revert
         vm.prank(WALLET);
-        vm.expectRevert("Length mismatch");
+        vm.expectRevert(WeightedECDSASigner.LengthMismatch.selector);
         signer.onInstall(abi.encodePacked(SIGNER_ID, installData));
     }
 
@@ -71,7 +71,7 @@ contract WeightedECDSAInstallTest is Test {
 
         // it should revert
         vm.prank(WALLET);
-        vm.expectRevert("Guardian cannot be self");
+        vm.expectRevert(WeightedECDSASigner.GuardianCannotBeSelf.selector);
         signer.onInstall(abi.encodePacked(SIGNER_ID, installData));
     }
 
@@ -86,7 +86,7 @@ contract WeightedECDSAInstallTest is Test {
 
         // it should revert
         vm.prank(WALLET);
-        vm.expectRevert("Guardian cannot be 0");
+        vm.expectRevert(WeightedECDSASigner.ZeroAddressGuardian.selector);
         signer.onInstall(abi.encodePacked(SIGNER_ID, installData));
     }
 
@@ -101,7 +101,7 @@ contract WeightedECDSAInstallTest is Test {
 
         // it should revert
         vm.prank(WALLET);
-        vm.expectRevert("Weight cannot be 0");
+        vm.expectRevert(WeightedECDSASigner.ZeroWeight.selector);
         signer.onInstall(abi.encodePacked(SIGNER_ID, installData));
     }
 
@@ -118,7 +118,7 @@ contract WeightedECDSAInstallTest is Test {
 
         // it should revert
         vm.prank(WALLET);
-        vm.expectRevert("Guardian already enabled");
+        vm.expectRevert(WeightedECDSASigner.GuardianAlreadyEnabled.selector);
         signer.onInstall(abi.encodePacked(SIGNER_ID, installData));
     }
 

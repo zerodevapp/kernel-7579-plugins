@@ -6,7 +6,7 @@ import {CallerPolicy, Status} from "src/policies/CallerPolicy.sol";
 import {IPolicy} from "src/interfaces/IERC7579Modules.sol";
 
 /// @title CallerPolicyValidationTest
-/// @notice BTT tests for the CallerPolicy caller validation fix (TOB-KERNEL-19)
+/// @notice BTT tests for CallerPolicy caller validation (TOB-KERNEL-19) and reinstall lifecycle (#63)
 /// @dev Tests the fix that validates callers array on install:
 ///      - Empty callers array should revert
 ///      - Zero address in callers should revert
@@ -34,7 +34,7 @@ contract CallerPolicyValidationTest is Test {
         bytes memory installData = abi.encodePacked(POLICY_ID, abi.encode(emptyCallers));
 
         vm.startPrank(WALLET_1);
-        vm.expectRevert("Empty callers array");
+        vm.expectRevert(CallerPolicy.EmptyCallers.selector);
         policy.onInstall(installData);
         vm.stopPrank();
     }
@@ -47,7 +47,7 @@ contract CallerPolicyValidationTest is Test {
         bytes memory installData = abi.encodePacked(POLICY_ID, abi.encode(callersWithZero));
 
         vm.startPrank(WALLET_1);
-        vm.expectRevert("Zero address caller");
+        vm.expectRevert(CallerPolicy.ZeroAddressCaller.selector);
         policy.onInstall(installData);
         vm.stopPrank();
     }
@@ -70,6 +70,133 @@ contract CallerPolicyValidationTest is Test {
         // Verify allowedCaller is set
         bool isAllowed = policy.allowedCaller(POLICY_ID, ALLOWED_CALLER_1, WALLET_1);
         assertTrue(isAllowed, "Allowed caller should be registered");
+    }
+
+    // ==================== Reinstallation Tests ====================
+
+    function test_WhenReinstallingAfterUninstallWithSamePolicyId() external {
+        _installPolicyWithCaller(WALLET_1, ALLOWED_CALLER_1);
+
+        vm.prank(WALLET_1);
+        policy.onUninstall(abi.encodePacked(POLICY_ID));
+        assertEq(uint256(policy.status(POLICY_ID, WALLET_1)), uint256(Status.Deprecated));
+
+        _installPolicyWithCaller(WALLET_1, ALLOWED_CALLER_2);
+        assertEq(uint256(policy.status(POLICY_ID, WALLET_1)), uint256(Status.Live));
+        assertFalse(policy.allowedCaller(POLICY_ID, ALLOWED_CALLER_1, WALLET_1));
+        assertTrue(policy.allowedCaller(POLICY_ID, ALLOWED_CALLER_2, WALLET_1));
+
+        vm.startPrank(WALLET_1);
+        assertEq(policy.checkSignaturePolicy(POLICY_ID, ALLOWED_CALLER_1, bytes32(0), ""), 1);
+        assertEq(policy.checkSignaturePolicy(POLICY_ID, ALLOWED_CALLER_2, bytes32(0), ""), 0);
+        vm.stopPrank();
+    }
+
+    function test_WhenUninstallingWithMultipleAndDuplicateCallers() external {
+        address[] memory callers = new address[](3);
+        callers[0] = ALLOWED_CALLER_1;
+        callers[1] = ALLOWED_CALLER_2;
+        callers[2] = ALLOWED_CALLER_1;
+
+        vm.startPrank(WALLET_1);
+        policy.onInstall(abi.encodePacked(POLICY_ID, abi.encode(callers)));
+        // Uninstall needs only the policy ID, not the caller list.
+        policy.onUninstall(abi.encodePacked(POLICY_ID));
+
+        assertFalse(policy.allowedCaller(POLICY_ID, ALLOWED_CALLER_1, WALLET_1));
+        assertFalse(policy.allowedCaller(POLICY_ID, ALLOWED_CALLER_2, WALLET_1));
+        assertEq(policy.checkSignaturePolicy(POLICY_ID, ALLOWED_CALLER_1, bytes32(0), ""), 1);
+        assertEq(policy.checkSignaturePolicy(POLICY_ID, ALLOWED_CALLER_2, bytes32(0), ""), 1);
+
+        vm.expectRevert(CallerPolicy.PolicyNotLive.selector);
+        policy.onUninstall(abi.encodePacked(POLICY_ID));
+        vm.stopPrank();
+    }
+
+    function test_WhenReinstallingWhileLive() external {
+        _installPolicyWithCaller(WALLET_1, ALLOWED_CALLER_1);
+        address[] memory callers = new address[](1);
+        callers[0] = ALLOWED_CALLER_2;
+
+        vm.prank(WALLET_1);
+        vm.expectRevert(CallerPolicy.PolicyAlreadyInstalled.selector);
+        policy.onInstall(abi.encodePacked(POLICY_ID, abi.encode(callers)));
+
+        assertEq(uint256(policy.status(POLICY_ID, WALLET_1)), uint256(Status.Live));
+        assertTrue(policy.allowedCaller(POLICY_ID, ALLOWED_CALLER_1, WALLET_1));
+        assertFalse(policy.allowedCaller(POLICY_ID, ALLOWED_CALLER_2, WALLET_1));
+    }
+
+    function test_WhenReinstallingWithInvalidCallers() external {
+        _installPolicyWithCaller(WALLET_1, ALLOWED_CALLER_1);
+
+        vm.startPrank(WALLET_1);
+        policy.onUninstall(abi.encodePacked(POLICY_ID));
+
+        address[] memory emptyCallers = new address[](0);
+        vm.expectRevert(CallerPolicy.EmptyCallers.selector);
+        policy.onInstall(abi.encodePacked(POLICY_ID, abi.encode(emptyCallers)));
+
+        address[] memory invalidCallers = new address[](2);
+        invalidCallers[0] = ALLOWED_CALLER_2;
+        invalidCallers[1] = address(0);
+        vm.expectRevert(CallerPolicy.ZeroAddressCaller.selector);
+        policy.onInstall(abi.encodePacked(POLICY_ID, abi.encode(invalidCallers)));
+        vm.stopPrank();
+
+        assertEq(uint256(policy.status(POLICY_ID, WALLET_1)), uint256(Status.Deprecated));
+        assertFalse(policy.allowedCaller(POLICY_ID, ALLOWED_CALLER_1, WALLET_1));
+        assertFalse(policy.allowedCaller(POLICY_ID, ALLOWED_CALLER_2, WALLET_1));
+
+        _installPolicyWithCaller(WALLET_1, ALLOWED_CALLER_1);
+        vm.prank(WALLET_1);
+        assertEq(policy.checkSignaturePolicy(POLICY_ID, ALLOWED_CALLER_2, bytes32(0), ""), 1);
+    }
+
+    function test_WhenReinstallingWithOtherWalletsAndPolicyIds() external {
+        bytes32 otherId = keccak256("OTHER_POLICY_ID");
+        _installPolicyWithCaller(WALLET_1, ALLOWED_CALLER_1);
+        _installPolicyWithCaller(WALLET_2, ALLOWED_CALLER_1);
+
+        address[] memory callers = new address[](1);
+        callers[0] = ALLOWED_CALLER_1;
+        vm.startPrank(WALLET_1);
+        policy.onInstall(abi.encodePacked(otherId, abi.encode(callers)));
+        policy.onUninstall(abi.encodePacked(POLICY_ID));
+        vm.stopPrank();
+
+        _installPolicyWithCaller(WALLET_1, ALLOWED_CALLER_2);
+
+        assertTrue(policy.allowedCaller(POLICY_ID, ALLOWED_CALLER_1, WALLET_2));
+        assertTrue(policy.allowedCaller(otherId, ALLOWED_CALLER_1, WALLET_1));
+        vm.prank(WALLET_2);
+        assertEq(policy.checkSignaturePolicy(POLICY_ID, ALLOWED_CALLER_1, bytes32(0), ""), 0);
+        vm.startPrank(WALLET_1);
+        assertEq(policy.checkSignaturePolicy(otherId, ALLOWED_CALLER_1, bytes32(0), ""), 0);
+        assertEq(policy.checkSignaturePolicy(otherId, ALLOWED_CALLER_2, bytes32(0), ""), 1);
+        assertEq(policy.checkSignaturePolicy(POLICY_ID, ALLOWED_CALLER_1, bytes32(0), ""), 1);
+        vm.stopPrank();
+    }
+
+    function testFuzz_WhenRotatingCallersAcrossRepeatedInstallations(address firstCaller, address secondCaller)
+        external
+    {
+        vm.assume(firstCaller != address(0) && secondCaller != address(0) && firstCaller != secondCaller);
+        _installPolicyWithCaller(WALLET_1, firstCaller);
+
+        for (uint256 i; i < 3; i++) {
+            vm.prank(WALLET_1);
+            policy.onUninstall(abi.encodePacked(POLICY_ID));
+            assertFalse(policy.allowedCaller(POLICY_ID, firstCaller, WALLET_1));
+            assertFalse(policy.allowedCaller(POLICY_ID, secondCaller, WALLET_1));
+
+            _installPolicyWithCaller(WALLET_1, secondCaller);
+            vm.startPrank(WALLET_1);
+            assertEq(policy.checkSignaturePolicy(POLICY_ID, firstCaller, bytes32(0), ""), 1);
+            assertEq(policy.checkSignaturePolicy(POLICY_ID, secondCaller, bytes32(0), ""), 0);
+            vm.stopPrank();
+            (firstCaller, secondCaller) = (secondCaller, firstCaller);
+        }
     }
 
     // ==================== Signature Policy Validation Tests ====================
@@ -196,7 +323,7 @@ contract CallerPolicyValidationTest is Test {
         bytes memory installData = abi.encodePacked(POLICY_ID, abi.encode(callersWithZeroFirst));
 
         vm.startPrank(WALLET_1);
-        vm.expectRevert("Zero address caller");
+        vm.expectRevert(CallerPolicy.ZeroAddressCaller.selector);
         policy.onInstall(installData);
         vm.stopPrank();
     }
@@ -208,7 +335,7 @@ contract CallerPolicyValidationTest is Test {
         bytes memory installData = abi.encodePacked(POLICY_ID, abi.encode(singleZero));
 
         vm.startPrank(WALLET_1);
-        vm.expectRevert("Zero address caller");
+        vm.expectRevert(CallerPolicy.ZeroAddressCaller.selector);
         policy.onInstall(installData);
         vm.stopPrank();
     }

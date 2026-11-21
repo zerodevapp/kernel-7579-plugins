@@ -3,6 +3,8 @@ pragma solidity ^0.8.20;
 
 import {Test} from "forge-std/Test.sol";
 import {TimelockPolicy} from "src/policies/TimelockPolicy.sol";
+import {AtomicCallHarness} from "test/utils/AtomicCallHarness.sol";
+import {MockTimelockEntryPoint} from "test/utils/MockTimelockEntryPoint.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
 
 /**
@@ -12,10 +14,12 @@ import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOper
  */
 contract TimelockEpochValidationTest is Test {
     TimelockPolicy public timelockPolicy;
+    MockTimelockEntryPoint internal entryPoint;
 
     address constant WALLET = address(0x1234);
     address constant WALLET2 = address(0x5678);
     address constant ATTACKER = address(0xBAD);
+    address constant PAYMASTER = address(0xCAFE);
 
     uint48 constant DELAY = 1 days;
     uint48 constant EXPIRATION_PERIOD = 1 days;
@@ -28,10 +32,14 @@ contract TimelockEpochValidationTest is Test {
 
     function setUp() public {
         timelockPolicy = new TimelockPolicy();
+        entryPoint = new MockTimelockEntryPoint();
+        AtomicCallHarness harness = new AtomicCallHarness();
+        vm.etch(WALLET, address(harness).code);
+        vm.etch(WALLET2, address(harness).code);
     }
 
-    function _installData() internal pure returns (bytes memory) {
-        return abi.encode(DELAY, EXPIRATION_PERIOD, GUARDIAN_ADDR);
+    function _installData() internal view returns (bytes memory) {
+        return abi.encode(DELAY, EXPIRATION_PERIOD, GUARDIAN_ADDR, address(entryPoint));
     }
 
     function _installPolicy(address wallet, bytes32 policyId) internal {
@@ -44,22 +52,57 @@ contract TimelockEpochValidationTest is Test {
         timelockPolicy.onUninstall(abi.encodePacked(policyId, ""));
     }
 
-    function _createProposal(address wallet, bytes32 policyId, bytes memory callData, uint256 nonce) internal {
-        // Create proposal via no-op UserOp (creates Pending directly with clock started)
-        bytes memory sig = abi.encodePacked(bytes32(callData.length), callData, bytes32(nonce), bytes1(0x00));
-        PackedUserOperation memory noopOp = PackedUserOperation({
+    function _paymasterAndData() internal pure returns (bytes memory) {
+        return abi.encodePacked(PAYMASTER, uint128(300_000), uint128(100_000));
+    }
+
+    function _creationOp(address wallet, bytes32 policyId, bytes memory callData, uint256 nonce)
+        internal
+        view
+        returns (PackedUserOperation memory)
+    {
+        return PackedUserOperation({
             sender: wallet,
             nonce: 0,
             initCode: "",
-            callData: "",
+            callData: timelockPolicy.getProposalCreationCallData(policyId, callData, nonce),
             accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
             preVerificationGas: 0,
             gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
-            paymasterAndData: "",
-            signature: sig
+            paymasterAndData: _paymasterAndData(),
+            signature: "authenticated-by-permission-signer"
         });
-        vm.prank(wallet);
-        timelockPolicy.checkUserOpPolicy(policyId, noopOp);
+    }
+
+    function _createProposal(address wallet, bytes32 policyId, bytes memory callData, uint256 nonce) internal {
+        PackedUserOperation memory creationOp = _creationOp(wallet, policyId, callData, nonce);
+        bytes32 userOpHash = timelockPolicy.getEntryPointUserOpHash(policyId, wallet, creationOp);
+        bytes32 userOpKey = timelockPolicy.computeUserOpKey(wallet, callData, nonce);
+
+        AtomicCallHarness.Call[] memory calls = new AtomicCallHarness.Call[](4);
+        calls[0] = AtomicCallHarness.Call({
+            target: address(timelockPolicy),
+            data: abi.encodeCall(timelockPolicy.checkUserOpPolicy, (policyId, creationOp))
+        });
+        calls[1] = AtomicCallHarness.Call({
+            target: address(entryPoint), data: abi.encodeCall(entryPoint.setCurrentUserOpHash, (userOpHash))
+        });
+        calls[2] = AtomicCallHarness.Call({
+            target: address(timelockPolicy),
+            data: abi.encodeCall(timelockPolicy.createProposal, (policyId, callData, nonce))
+        });
+        calls[3] = AtomicCallHarness.Call({
+            target: address(timelockPolicy),
+            data: abi.encodeCall(timelockPolicy.proposalCommitments, (userOpHash, userOpKey, policyId, wallet))
+        });
+        (bool[] memory successes, bytes[] memory results) = AtomicCallHarness(wallet).execute(calls);
+
+        assertTrue(successes[0], "creation validation reverted");
+        assertEq(abi.decode(results[0], (uint256)), 0, "Creation validation should commit proposal");
+        assertTrue(successes[1], "EntryPoint hash update reverted");
+        assertTrue(successes[2], "proposal creation reverted");
+        assertTrue(successes[3], "commitment read reverted");
+        assertEq(abi.decode(results[3], (uint256)), 0, "Creation should consume commitment");
     }
 
     function _createUserOp(address sender, bytes memory callData, uint256 nonce)
@@ -99,8 +142,7 @@ contract TimelockEpochValidationTest is Test {
         assertEq(epochAfter, 1, "Epoch should be 1 after first install");
 
         // it should initialize the policy config
-        (uint48 delay, uint48 expirationPeriod, address guardian_, bool initialized) =
-            timelockPolicy.timelockConfig(POLICY_ID_1, WALLET);
+        (uint48 delay, uint48 expirationPeriod,, bool initialized) = timelockPolicy.timelockConfig(POLICY_ID_1, WALLET);
         assertTrue(initialized, "Policy should be initialized");
         assertEq(delay, DELAY, "Delay should match");
         assertEq(expirationPeriod, EXPIRATION_PERIOD, "Expiration period should match");
@@ -175,7 +217,7 @@ contract TimelockEpochValidationTest is Test {
         assertEq(validUntil, block.timestamp + DELAY + EXPIRATION_PERIOD, "validUntil should be correct");
     }
 
-    function test_GivenCreatingViaNoOpUserOp() external whenCreatingAProposal {
+    function test_GivenCreatingViaAuthenticatedSponsoredUserOp() external whenCreatingAProposal {
         _installPolicy(WALLET, POLICY_ID_1);
 
         bytes memory callData = hex"5678";
@@ -185,13 +227,69 @@ contract TimelockEpochValidationTest is Test {
 
         _createProposal(WALLET, POLICY_ID_1, callData, nonce);
 
-        // it should record the epoch at creation time (proposal is Pending)
+        // It records the current epoch after the committed creation call executes.
         bytes32 userOpKey = timelockPolicy.computeUserOpKey(WALLET, callData, nonce);
         (TimelockPolicy.ProposalStatus status,,, uint256 proposalEpoch) =
             timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
 
         assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.Pending), "Should be Pending");
         assertEq(proposalEpoch, epoch, "Proposal epoch should equal current epoch at creation");
+    }
+
+    function test_GivenCommitmentWasWrittenBeforeUninstallAndReinstall() external whenCreatingAProposal {
+        _installPolicy(WALLET, POLICY_ID_1);
+
+        bytes memory callData = hex"c0ffee";
+        uint256 nonce = 43;
+        PackedUserOperation memory creationOp = _creationOp(WALLET, POLICY_ID_1, callData, nonce);
+        bytes32 userOpHash = timelockPolicy.getEntryPointUserOpHash(POLICY_ID_1, WALLET, creationOp);
+        bytes32 userOpKey = timelockPolicy.computeUserOpKey(WALLET, callData, nonce);
+
+        AtomicCallHarness.Call[] memory calls = new AtomicCallHarness.Call[](8);
+        calls[0] = AtomicCallHarness.Call({
+            target: address(timelockPolicy),
+            data: abi.encodeCall(timelockPolicy.checkUserOpPolicy, (POLICY_ID_1, creationOp))
+        });
+        calls[1] = AtomicCallHarness.Call({
+            target: address(entryPoint), data: abi.encodeCall(entryPoint.setCurrentUserOpHash, (userOpHash))
+        });
+        calls[2] = AtomicCallHarness.Call({
+            target: address(timelockPolicy),
+            data: abi.encodeCall(timelockPolicy.proposalCommitments, (userOpHash, userOpKey, POLICY_ID_1, WALLET))
+        });
+        calls[3] = AtomicCallHarness.Call({
+            target: address(timelockPolicy),
+            data: abi.encodeCall(timelockPolicy.onUninstall, (abi.encodePacked(POLICY_ID_1)))
+        });
+        calls[4] = AtomicCallHarness.Call({
+            target: address(timelockPolicy),
+            data: abi.encodeCall(timelockPolicy.onInstall, (abi.encodePacked(POLICY_ID_1, _installData())))
+        });
+        calls[5] = calls[2];
+        calls[6] = AtomicCallHarness.Call({
+            target: address(timelockPolicy),
+            data: abi.encodeCall(timelockPolicy.createProposal, (POLICY_ID_1, callData, nonce))
+        });
+        calls[7] = calls[2];
+        (bool[] memory successes, bytes[] memory results) = AtomicCallHarness(WALLET).execute(calls);
+
+        assertTrue(successes[0]);
+        assertEq(abi.decode(results[0], (uint256)), 0);
+        assertTrue(successes[1]);
+        assertTrue(successes[2]);
+        assertEq(abi.decode(results[2], (uint256)), 1);
+        assertTrue(successes[3]);
+        assertTrue(successes[4]);
+        assertTrue(successes[5]);
+        assertEq(abi.decode(results[5], (uint256)), 1);
+        assertFalse(successes[6]);
+        assertEq(bytes4(results[6]), TimelockPolicy.MissingProposalCommitment.selector);
+        assertTrue(successes[7]);
+        assertEq(abi.decode(results[7], (uint256)), 1);
+
+        (TimelockPolicy.ProposalStatus status,,,) = timelockPolicy.proposals(userOpKey, POLICY_ID_1, WALLET);
+        assertEq(uint256(status), uint256(TimelockPolicy.ProposalStatus.None));
+        assertEq(timelockPolicy.currentEpoch(POLICY_ID_1, WALLET), 2);
     }
 
     // ==================== Executing a Proposal ====================
@@ -214,7 +312,7 @@ contract TimelockEpochValidationTest is Test {
         bytes memory callData = hex"1234";
         uint256 nonce = 1;
 
-        // Create proposal via no-op UserOp (creates Pending directly with clock started)
+        // Validate the sponsored canonical call, then execute it to start the clock.
         _createProposal(WALLET, POLICY_ID_1, callData, nonce);
 
         // Warp past the timelock delay
@@ -240,7 +338,7 @@ contract TimelockEpochValidationTest is Test {
         bytes memory callData = hex"1234";
         uint256 nonce = 1;
 
-        // Create proposal via no-op UserOp (Pending with clock started, epoch 1)
+        // Create through the authenticated flow in epoch 1.
         _createProposal(WALLET, POLICY_ID_1, callData, nonce);
 
         // Warp past the timelock delay
@@ -271,7 +369,7 @@ contract TimelockEpochValidationTest is Test {
         bytes memory callData = hex"abcd";
         uint256 nonce = 5;
 
-        // Create proposal via no-op UserOp in epoch 1 (Pending with clock started)
+        // Create through the authenticated flow in epoch 1.
         _createProposal(WALLET, POLICY_ID_1, callData, nonce);
 
         bytes32 userOpKey = timelockPolicy.computeUserOpKey(WALLET, callData, nonce);
@@ -351,7 +449,7 @@ contract TimelockEpochValidationTest is Test {
         bytes memory callData = hex"1234";
         uint256 nonce = 1;
 
-        // Create proposal via no-op UserOp in epoch 1 (Pending with clock started)
+        // Create through the authenticated flow in epoch 1.
         _createProposal(WALLET, POLICY_ID_1, callData, nonce);
 
         uint256 epochBeforeUninstall = timelockPolicy.currentEpoch(POLICY_ID_1, WALLET);
@@ -473,7 +571,7 @@ contract TimelockEpochValidationTest is Test {
         _uninstallPolicy(WALLET, POLICY_ID_1);
         _installPolicy(WALLET, POLICY_ID_1);
 
-        // User creates legitimate proposal via no-op UserOp with new epoch
+        // User creates a legitimate sponsored proposal in the new epoch.
         bytes memory callData = hex"abcd";
         uint256 userNonce = 200;
         _createProposal(WALLET, POLICY_ID_1, callData, userNonce);
@@ -494,7 +592,7 @@ contract TimelockEpochValidationTest is Test {
         _installPolicy(WALLET, POLICY_ID_1);
         _installPolicy(WALLET2, POLICY_ID_1);
 
-        // Both users create proposals via no-op UserOp
+        // Both users create sponsored proposals through their own accounts.
         bytes memory callData1 = hex"1111";
         bytes memory callData2 = hex"2222";
 

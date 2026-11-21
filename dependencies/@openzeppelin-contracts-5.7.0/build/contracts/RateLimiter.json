@@ -1,0 +1,16 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "RateLimiter",
+  "sourceName": "contracts/utils/RateLimiter.sol",
+  "abi": [
+    {
+      "inputs": [],
+      "name": "RateLimitExceeded",
+      "type": "error"
+    }
+  ],
+  "bytecode": "0x60556032600b8282823980515f1a607314602657634e487b7160e01b5f525f60045260245ffd5b305f52607381538281f3fe730000000000000000000000000000000000000000301460806040525f5ffdfea26469706673582212209860f54fe5e0e82026d53dd7f41bbbfb77127bb65db65c1fc0c1a36f3e1b3a2964736f6c63430008230033",
+  "deployedBytecode": "0x730000000000000000000000000000000000000000301460806040525f5ffdfea26469706673582212209860f54fe5e0e82026d53dd7f41bbbfb77127bb65db65c1fc0c1a36f3e1b3a2964736f6c63430008230033",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}

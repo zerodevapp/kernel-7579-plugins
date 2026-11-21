@@ -1,0 +1,16 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "RLP",
+  "sourceName": "contracts/utils/RLP.sol",
+  "abi": [
+    {
+      "inputs": [],
+      "name": "RLPInvalidEncoding",
+      "type": "error"
+    }
+  ],
+  "bytecode": "0x60556032600b8282823980515f1a607314602657634e487b7160e01b5f525f60045260245ffd5b305f52607381538281f3fe730000000000000000000000000000000000000000301460806040525f5ffdfea2646970667358221220a1898e3033d0b9e4dbebbb14ba89a2471acabf2308f3bca5b4aaf775f95d316d64736f6c63430008230033",
+  "deployedBytecode": "0x730000000000000000000000000000000000000000301460806040525f5ffdfea2646970667358221220a1898e3033d0b9e4dbebbb14ba89a2471acabf2308f3bca5b4aaf775f95d316d64736f6c63430008230033",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}

@@ -4,17 +4,11 @@ pragma solidity ^0.8.0;
 
 import {ECDSA} from "solady/utils/ECDSA.sol";
 import {PackedUserOperation} from "account-abstraction/interfaces/PackedUserOperation.sol";
-import {
-    IValidator,
-    IHook,
-    IStatelessValidator,
-    IStatelessValidatorWithSender
-} from "src/interfaces/IERC7579Modules.sol";
+import {IValidator, IStatelessValidator, IStatelessValidatorWithSender} from "src/interfaces/IERC7579Modules.sol";
 import {
     SIG_VALIDATION_SUCCESS_UINT,
     SIG_VALIDATION_FAILED_UINT,
     MODULE_TYPE_VALIDATOR,
-    MODULE_TYPE_HOOK,
     MODULE_TYPE_STATELESS_VALIDATOR,
     MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER,
     ERC1271_MAGICVALUE,
@@ -25,14 +19,13 @@ struct ECDSAValidatorStorage {
     address owner;
 }
 
-contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessValidatorWithSender {
+contract ECDSAValidator is IValidator, IStatelessValidator, IStatelessValidatorWithSender {
     event OwnerRegistered(address indexed kernel, address indexed owner);
 
     mapping(address => ECDSAValidatorStorage) public ecdsaValidatorStorage;
 
     error InvalidDataLength();
     error ZeroAddressOwner();
-    error SenderNotOwner();
 
     function onInstall(bytes calldata _data) external payable override {
         if (_isInitialized(msg.sender)) revert AlreadyInitialized(msg.sender);
@@ -49,8 +42,8 @@ contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessVal
     }
 
     function isModuleType(uint256 typeID) external pure override returns (bool) {
-        return typeID == MODULE_TYPE_VALIDATOR || typeID == MODULE_TYPE_HOOK
-            || typeID == MODULE_TYPE_STATELESS_VALIDATOR || typeID == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
+        return typeID == MODULE_TYPE_VALIDATOR || typeID == MODULE_TYPE_STATELESS_VALIDATOR
+            || typeID == MODULE_TYPE_STATELESS_VALIDATOR_WITH_SENDER;
     }
 
     function _isInitialized(address smartAccount) internal view returns (bool) {
@@ -58,6 +51,7 @@ contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessVal
     }
 
     function _verifySignature(bytes32 hash, bytes calldata sig, address signer) internal view returns (bool) {
+        if (signer == address(0)) return false;
         if (signer == ECDSA.tryRecoverCalldata(hash, sig)) {
             return true;
         }
@@ -84,8 +78,10 @@ contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessVal
     /// @dev The `sender` parameter (requesting protocol) is intentionally unused.
     ///      This validator authenticates the SIGNER (owner), not the requesting protocol.
     ///      WARNING: Because sender is ignored, any protocol can request signature
-    ///      validation. If you need to restrict which protocols can request signatures,
-    ///      pair this validator with a CallerPolicy.
+    ///      validation through a root or validator route. CallerPolicy constrains only its
+    ///      permission route and cannot restrict this validator. Deployments that need a
+    ///      requester restriction must not reuse this owner on an unrestricted route and
+    ///      should use application-domain-separated digests.
     function isValidSignatureWithSender(address, bytes32 hash, bytes calldata sig)
         external
         view
@@ -104,7 +100,9 @@ contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessVal
         override(IStatelessValidator)
         returns (bool)
     {
-        return _verifySignature(hash, signature, address(bytes20(data[0:20])));
+        if (data.length != 20) return false;
+        address statelessOwner = address(bytes20(data[0:20]));
+        return _verifySignature(hash, signature, statelessOwner);
     }
 
     function validateSignatureWithDataWithSender(address, bytes32 hash, bytes calldata signature, bytes calldata data)
@@ -113,13 +111,8 @@ contract ECDSAValidator is IValidator, IHook, IStatelessValidator, IStatelessVal
         override(IStatelessValidatorWithSender)
         returns (bool)
     {
-        return _verifySignature(hash, signature, address(bytes20(data[0:20])));
+        if (data.length != 20) return false;
+        address statelessOwner = address(bytes20(data[0:20]));
+        return _verifySignature(hash, signature, statelessOwner);
     }
-
-    function preCheck(address msgSender, uint256, bytes calldata) external payable override returns (bytes memory) {
-        require(msgSender == ecdsaValidatorStorage[msg.sender].owner, SenderNotOwner());
-        return hex"";
-    }
-
-    function postCheck(bytes calldata hookData) external payable override {}
 }

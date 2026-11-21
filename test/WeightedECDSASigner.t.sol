@@ -46,6 +46,57 @@ contract WeightedECDSASignerTest is SignerTestBase, StatelessValidatorTestBase, 
         return abi.encode(guardians, weights, threshold);
     }
 
+    function _domainSeparator(bool replayable) internal view returns (bytes32) {
+        if (replayable) {
+            return keccak256(
+                abi.encode(
+                    keccak256("EIP712Domain(string name,string version,address verifyingContract)"),
+                    keccak256("WeightedECDSASigner"),
+                    keccak256("0.0.3"),
+                    address(module)
+                )
+            );
+        }
+        return keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256("WeightedECDSASigner"),
+                keccak256("0.0.3"),
+                block.chainid,
+                address(module)
+            )
+        );
+    }
+
+    function _proposalHash(PackedUserOperation memory userOp) internal view returns (bytes32) {
+        bool replayable = userOp.nonce & (uint256(0x40) << 248) != 0;
+        bytes32 structHash = keccak256(
+            abi.encode(
+                keccak256(
+                    "Proposal(address account,bytes32 id,bytes callData,uint256 nonce,uint256 configurationEpoch)"
+                ),
+                userOp.sender,
+                signerId(),
+                keccak256(userOp.callData),
+                userOp.nonce,
+                WeightedECDSASigner(address(module)).configurationEpoch(signerId(), WALLET)
+            )
+        );
+        return keccak256(abi.encodePacked("\x19\x01", _domainSeparator(replayable), structHash));
+    }
+
+    function _finalHash(PackedUserOperation memory userOp, bytes32 userOpHash) internal view returns (bytes32) {
+        bool replayable = userOp.nonce & (uint256(0x40) << 248) != 0;
+        bytes32 structHash = keccak256(
+            abi.encode(
+                keccak256("WeightedUserOperation(bytes32 userOpHash,uint256 configurationEpoch)"),
+                userOpHash,
+                WeightedECDSASigner(address(module)).configurationEpoch(signerId(), WALLET)
+            )
+        );
+        return keccak256(abi.encodePacked("\x19\x01", _domainSeparator(replayable), structHash));
+    }
+
     function userOpSignature(PackedUserOperation memory userOp, bool valid)
         internal
         view
@@ -65,37 +116,12 @@ contract WeightedECDSASignerTest is SignerTestBase, StatelessValidatorTestBase, 
         // - The last signature signs the userOpHash
         // We'll use guardian1 to sign proposalHash and guardian2 to sign userOpHash
 
-        // Manually compute EIP712 hash
-        bytes32 domainSeparator = keccak256(
-            abi.encode(
-                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-                keccak256("WeightedECDSASigner"),
-                keccak256("0.0.2"),
-                block.chainid,
-                address(module)
-            )
-        );
-
-        bytes32 proposalHash = keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                domainSeparator,
-                keccak256(
-                    abi.encode(
-                        keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce)"),
-                        userOp.sender,
-                        signerId(),
-                        keccak256(userOp.callData),
-                        userOp.nonce
-                    )
-                )
-            )
-        );
+        bytes32 proposalHash = _proposalHash(userOp);
 
         // Sign proposalHash with guardian1 (first signature, sorted order)
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(guardian1Key, proposalHash);
         // Sign userOpHash with guardian2 (last signature)
-        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(guardian2Key, userOpHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(guardian2Key, _finalHash(userOp, userOpHash));
 
         // Guardian1 has lower address, must come first (sorted order)
         if (guardian1 < guardian2) {
@@ -302,32 +328,7 @@ contract WeightedECDSASignerTest is SignerTestBase, StatelessValidatorTestBase, 
 
         bytes32 userOpHash = ENTRYPOINT.getUserOpHash(userOp);
 
-        // Compute proposalHash
-        bytes32 domainSeparator = keccak256(
-            abi.encode(
-                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-                keccak256("WeightedECDSASigner"),
-                keccak256("0.0.2"),
-                block.chainid,
-                address(module)
-            )
-        );
-
-        bytes32 proposalHash = keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                domainSeparator,
-                keccak256(
-                    abi.encode(
-                        keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce)"),
-                        userOp.sender,
-                        signerId(),
-                        keccak256(userOp.callData),
-                        userOp.nonce
-                    )
-                )
-            )
-        );
+        bytes32 proposalHash = _proposalHash(userOp);
 
         // Create a non-guardian account to sign userOpHash
         (address nonGuardian, uint256 nonGuardianKey) = makeAddrAndKey("nonGuardian");
@@ -337,7 +338,7 @@ contract WeightedECDSASignerTest is SignerTestBase, StatelessValidatorTestBase, 
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(guardian1Key, proposalHash);
         (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(guardian2Key, proposalHash);
         // Have non-guardian sign userOpHash (this should fail validation)
-        (uint8 v3, bytes32 r3, bytes32 s3) = vm.sign(nonGuardianKey, userOpHash);
+        (uint8 v3, bytes32 r3, bytes32 s3) = vm.sign(nonGuardianKey, _finalHash(userOp, userOpHash));
 
         // Sort first two signatures, last one is userOpHash signature
         bytes memory signature;
@@ -380,39 +381,14 @@ contract WeightedECDSASignerTest is SignerTestBase, StatelessValidatorTestBase, 
 
         bytes32 userOpHash = ENTRYPOINT.getUserOpHash(userOp);
 
-        // Compute proposalHash
-        bytes32 domainSeparator = keccak256(
-            abi.encode(
-                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-                keccak256("WeightedECDSASigner"),
-                keccak256("0.0.2"),
-                block.chainid,
-                address(module)
-            )
-        );
-
-        bytes32 proposalHash = keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                domainSeparator,
-                keccak256(
-                    abi.encode(
-                        keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce)"),
-                        userOp.sender,
-                        signerId(),
-                        keccak256(userOp.callData),
-                        userOp.nonce
-                    )
-                )
-            )
-        );
+        bytes32 proposalHash = _proposalHash(userOp);
 
         // Guardian1 (weight 50) signs proposalHash
         // Guardian1 also signs userOpHash (should not add weight twice)
         // Total weight should be 50, not 100
         // Threshold is 60, so this should FAIL
         (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(guardian1Key, proposalHash);
-        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(guardian1Key, userOpHash);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(guardian1Key, _finalHash(userOp, userOpHash));
 
         bytes memory signature = abi.encodePacked(r1, s1, v1, r2, s2, v2);
         userOp.signature = signature;
@@ -424,5 +400,146 @@ contract WeightedECDSASignerTest is SignerTestBase, StatelessValidatorTestBase, 
         // Should FAIL because guardian1's weight (50) is only counted once, not twice
         // 50 < threshold (60)
         assertEq(result, 1); // SIG_VALIDATION_FAILED_UINT
+    }
+
+    function testReplayableUserOpSignatureSurvivesChainChange() public {
+        WeightedECDSASigner signerModule = WeightedECDSASigner(address(module));
+        vm.prank(WALLET);
+        signerModule.onInstall(abi.encodePacked(signerId(), installData()));
+
+        PackedUserOperation memory userOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: (uint256(0x40) << 248) | 1,
+            initCode: "",
+            callData: hex"1234",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: ""
+        });
+        bytes32 chainAgnosticUserOpHash = ENTRYPOINT.getUserOpHash(userOp);
+        userOp.signature = userOpSignature(userOp, true);
+
+        vm.chainId(block.chainid + 1);
+        vm.prank(WALLET);
+        assertEq(
+            signerModule.checkUserOpSignature(signerId(), userOp, chainAgnosticUserOpHash),
+            0,
+            "replayable signature must use the chain-agnostic domain"
+        );
+    }
+
+    function testFuzzReplayableAndChainBoundDomainsRemainSeparated(
+        uint64 rawSourceChainId,
+        uint64 rawDestinationChainId,
+        uint64 lowNonce,
+        bytes32 callDataSalt
+    ) public {
+        uint256 sourceChainId = uint256(rawSourceChainId);
+        uint256 destinationChainId = uint256(rawDestinationChainId);
+        if (destinationChainId == sourceChainId) {
+            destinationChainId = sourceChainId == type(uint64).max ? 0 : sourceChainId + 1;
+        }
+        vm.chainId(sourceChainId);
+
+        WeightedECDSASigner signerModule = WeightedECDSASigner(address(module));
+        vm.prank(WALLET);
+        signerModule.onInstall(abi.encodePacked(signerId(), installData()));
+
+        PackedUserOperation memory replayableOp = _auditUserOp((uint256(0x40) << 248) | lowNonce, callDataSalt);
+        bytes32 replayableHash = ENTRYPOINT.getUserOpHash(replayableOp);
+        replayableOp.signature = userOpSignature(replayableOp, true);
+
+        PackedUserOperation memory chainBoundOp = _auditUserOp(uint256(lowNonce), callDataSalt);
+        bytes32 chainBoundHash = ENTRYPOINT.getUserOpHash(chainBoundOp);
+        chainBoundOp.signature = userOpSignature(chainBoundOp, true);
+
+        vm.chainId(destinationChainId);
+        vm.prank(WALLET);
+        assertEq(
+            signerModule.checkUserOpSignature(signerId(), replayableOp, replayableHash),
+            0,
+            "replayable approval changed across chains"
+        );
+
+        vm.prank(WALLET);
+        (bool success, bytes memory result) = address(signerModule)
+            .call(abi.encodeCall(signerModule.checkUserOpSignature, (signerId(), chainBoundOp, chainBoundHash)));
+        assertTrue(!success || abi.decode(result, (uint256)) != 0, "chain-bound approval crossed chains");
+    }
+
+    function testOldUserOpApprovalFailsAfterReinstall() public {
+        WeightedECDSASigner signerModule = WeightedECDSASigner(address(module));
+        vm.prank(WALLET);
+        signerModule.onInstall(abi.encodePacked(signerId(), installData()));
+
+        PackedUserOperation memory userOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: 1,
+            initCode: "",
+            callData: hex"1234",
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: ""
+        });
+        bytes32 userOpHash = ENTRYPOINT.getUserOpHash(userOp);
+        userOp.signature = userOpSignature(userOp, true);
+        assertEq(signerModule.configurationEpoch(signerId(), WALLET), 1);
+
+        vm.startPrank(WALLET);
+        signerModule.onUninstall(abi.encodePacked(signerId()));
+        signerModule.onInstall(abi.encodePacked(signerId(), installData()));
+        vm.stopPrank();
+        assertEq(signerModule.configurationEpoch(signerId(), WALLET), 2);
+
+        vm.prank(WALLET);
+        (bool success, bytes memory result) = address(signerModule)
+            .call(abi.encodeCall(signerModule.checkUserOpSignature, (signerId(), userOp, userOpHash)));
+        assertTrue(!success || abi.decode(result, (uint256)) != 0, "old approval must not survive configuration change");
+    }
+
+    function testFuzzOldUserOpApprovalFailsAfterEveryReinstallCycle(uint8 rawCycles, bytes32 callDataSalt) public {
+        WeightedECDSASigner signerModule = WeightedECDSASigner(address(module));
+        vm.prank(WALLET);
+        signerModule.onInstall(abi.encodePacked(signerId(), installData()));
+
+        PackedUserOperation memory userOp = _auditUserOp(1, callDataSalt);
+        bytes32 userOpHash = ENTRYPOINT.getUserOpHash(userOp);
+        userOp.signature = userOpSignature(userOp, true);
+
+        uint256 cycles = bound(uint256(rawCycles), 1, 8);
+        vm.startPrank(WALLET);
+        for (uint256 i; i < cycles; ++i) {
+            signerModule.onUninstall(abi.encodePacked(signerId()));
+            signerModule.onInstall(abi.encodePacked(signerId(), installData()));
+        }
+        vm.stopPrank();
+        assertEq(signerModule.configurationEpoch(signerId(), WALLET), cycles + 1);
+
+        vm.prank(WALLET);
+        (bool success, bytes memory result) = address(signerModule)
+            .call(abi.encodeCall(signerModule.checkUserOpSignature, (signerId(), userOp, userOpHash)));
+        assertTrue(!success || abi.decode(result, (uint256)) != 0, "old approval survived a later epoch");
+    }
+
+    function _auditUserOp(uint256 nonce, bytes32 callDataSalt)
+        internal
+        pure
+        returns (PackedUserOperation memory userOp)
+    {
+        userOp = PackedUserOperation({
+            sender: WALLET,
+            nonce: nonce,
+            initCode: "",
+            callData: abi.encodePacked(callDataSalt),
+            accountGasLimits: bytes32(abi.encodePacked(uint128(100000), uint128(200000))),
+            preVerificationGas: 0,
+            gasFees: bytes32(abi.encodePacked(uint128(1), uint128(1))),
+            paymasterAndData: "",
+            signature: ""
+        });
     }
 }

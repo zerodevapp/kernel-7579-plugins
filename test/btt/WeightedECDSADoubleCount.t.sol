@@ -35,6 +35,10 @@ contract WeightedECDSADoubleCountTest is Test {
     uint24 public constant THRESHOLD = 70; // Requires at least 2 guardians
 
     bytes32 public constant SIGNER_ID = keccak256("TEST_SIGNER_ID");
+    bytes32 internal constant PROPOSAL_TYPEHASH =
+        keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce,uint256 configurationEpoch)");
+    bytes32 internal constant USER_OP_TYPEHASH =
+        keccak256("WeightedUserOperation(bytes32 userOpHash,uint256 configurationEpoch)");
 
     function setUp() public {
         signer = new WeightedECDSASigner();
@@ -102,7 +106,7 @@ contract WeightedECDSADoubleCountTest is Test {
             abi.encode(
                 keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
                 keccak256("WeightedECDSASigner"),
-                keccak256("0.0.2"),
+                keccak256("0.0.3"),
                 block.chainid,
                 address(signer)
             )
@@ -110,14 +114,30 @@ contract WeightedECDSADoubleCountTest is Test {
 
         bytes32 structHash = keccak256(
             abi.encode(
-                keccak256("Proposal(address account,bytes32 id,bytes callData,uint256 nonce)"),
+                PROPOSAL_TYPEHASH,
                 userOp.sender,
                 SIGNER_ID,
                 keccak256(userOp.callData),
-                userOp.nonce
+                userOp.nonce,
+                signer.configurationEpoch(SIGNER_ID, wallet)
             )
         );
 
+        return keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
+    }
+
+    function _computeFinalHash(bytes32 userOpHash) internal view returns (bytes32) {
+        bytes32 domainSeparator = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256("WeightedECDSASigner"),
+                keccak256("0.0.3"),
+                block.chainid,
+                address(signer)
+            )
+        );
+        bytes32 structHash =
+            keccak256(abi.encode(USER_OP_TYPEHASH, userOpHash, signer.configurationEpoch(SIGNER_ID, wallet)));
         return keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
     }
 
@@ -153,7 +173,7 @@ contract WeightedECDSADoubleCountTest is Test {
         // Use guardianLow to sign BOTH hashes
         // This simulates the double-counting attack
         bytes memory sig1 = _signWithKey(proposalHash, guardianLowKey);
-        bytes memory sig2 = _signWithKey(userOpHash, guardianLowKey);
+        bytes memory sig2 = _signWithKey(_computeFinalHash(userOpHash), guardianLowKey);
 
         // Concatenate signatures: first signs proposalHash, last signs userOpHash
         userOp.signature = abi.encodePacked(sig1, sig2);
@@ -181,7 +201,7 @@ contract WeightedECDSADoubleCountTest is Test {
         // guardianHigh signs userOpHash (weight 40)
         // Total: 80 >= threshold 70
         bytes memory sig1 = _signWithKey(proposalHash, guardianLowKey);
-        bytes memory sig2 = _signWithKey(userOpHash, guardianHighKey);
+        bytes memory sig2 = _signWithKey(_computeFinalHash(userOpHash), guardianHighKey);
 
         // guardianLow < guardianHigh, so sorted order is maintained
         userOp.signature = abi.encodePacked(sig1, sig2);
@@ -207,12 +227,12 @@ contract WeightedECDSADoubleCountTest is Test {
         // guardianMid signs userOpHash
         bytes memory sig1 = _signWithKey(proposalHash, guardianHighKey);
         bytes memory sig2 = _signWithKey(proposalHash, guardianLowKey);
-        bytes memory sig3 = _signWithKey(userOpHash, guardianMidKey);
+        bytes memory sig3 = _signWithKey(_computeFinalHash(userOpHash), guardianMidKey);
 
         userOp.signature = abi.encodePacked(sig1, sig2, sig3);
 
         vm.prank(wallet);
-        vm.expectRevert("Signers not sorted");
+        vm.expectRevert(WeightedECDSASigner.SignersNotSorted.selector);
         signer.checkUserOpSignature(SIGNER_ID, userOp, userOpHash);
     }
 
@@ -231,7 +251,7 @@ contract WeightedECDSADoubleCountTest is Test {
         // guardianLow signs userOpHash (lower address, weight 40)
         // Total weight = 80 >= threshold 70
         bytes memory sig1 = _signWithKey(proposalHash, guardianHighKey);
-        bytes memory sig2 = _signWithKey(userOpHash, guardianLowKey);
+        bytes memory sig2 = _signWithKey(_computeFinalHash(userOpHash), guardianLowKey);
 
         userOp.signature = abi.encodePacked(sig1, sig2);
 
@@ -254,7 +274,7 @@ contract WeightedECDSADoubleCountTest is Test {
 
         // Use guardianMid to sign both hashes
         bytes memory sig1 = _signWithKey(proposalHash, guardianMidKey);
-        bytes memory sig2 = _signWithKey(userOpHash, guardianMidKey);
+        bytes memory sig2 = _signWithKey(_computeFinalHash(userOpHash), guardianMidKey);
 
         userOp.signature = abi.encodePacked(sig1, sig2);
 
@@ -278,7 +298,7 @@ contract WeightedECDSADoubleCountTest is Test {
         // guardianHigh signs userOpHash (weight 40)
         // Total: 70 >= threshold 70
         bytes memory sig1 = _signWithKey(proposalHash, guardianMidKey);
-        bytes memory sig2 = _signWithKey(userOpHash, guardianHighKey);
+        bytes memory sig2 = _signWithKey(_computeFinalHash(userOpHash), guardianHighKey);
 
         // guardianMid < guardianHigh, sorted order maintained
         userOp.signature = abi.encodePacked(sig1, sig2);
@@ -304,7 +324,7 @@ contract WeightedECDSADoubleCountTest is Test {
         // Total would be 110 if all counted, but threshold met at 70
         bytes memory sig1 = _signWithKey(proposalHash, guardianLowKey);
         bytes memory sig2 = _signWithKey(proposalHash, guardianMidKey);
-        bytes memory sig3 = _signWithKey(userOpHash, guardianHighKey);
+        bytes memory sig3 = _signWithKey(_computeFinalHash(userOpHash), guardianHighKey);
 
         userOp.signature = abi.encodePacked(sig1, sig2, sig3);
 
@@ -365,7 +385,7 @@ contract WeightedECDSADoubleCountTest is Test {
         bytes32 userOpHash = entryPoint.getUserOpHash(userOp);
 
         // Only guardianHigh signs userOpHash (weight 40)
-        bytes memory sig = _signWithKey(userOpHash, guardianHighKey);
+        bytes memory sig = _signWithKey(_computeFinalHash(userOpHash), guardianHighKey);
 
         userOp.signature = sig;
 
@@ -390,7 +410,7 @@ contract WeightedECDSADoubleCountTest is Test {
         // guardianHigh signs userOpHash but threshold already met
         bytes memory sig1 = _signWithKey(proposalHash, guardianLowKey);
         bytes memory sig2 = _signWithKey(proposalHash, guardianMidKey);
-        bytes memory sig3 = _signWithKey(userOpHash, guardianHighKey);
+        bytes memory sig3 = _signWithKey(_computeFinalHash(userOpHash), guardianHighKey);
 
         userOp.signature = abi.encodePacked(sig1, sig2, sig3);
 

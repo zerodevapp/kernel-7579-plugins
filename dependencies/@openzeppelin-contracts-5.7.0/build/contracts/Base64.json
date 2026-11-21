@@ -1,0 +1,22 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "Base64",
+  "sourceName": "contracts/utils/Base64.sol",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "bytes1",
+          "name": "",
+          "type": "bytes1"
+        }
+      ],
+      "name": "InvalidBase64Char",
+      "type": "error"
+    }
+  ],
+  "bytecode": "0x60556032600b8282823980515f1a607314602657634e487b7160e01b5f525f60045260245ffd5b305f52607381538281f3fe730000000000000000000000000000000000000000301460806040525f5ffdfea2646970667358221220506266bbff936e941d5d3349949fdc360beb259bdba49e513e1e0dda0fc8bbb764736f6c63430008230033",
+  "deployedBytecode": "0x730000000000000000000000000000000000000000301460806040525f5ffdfea2646970667358221220506266bbff936e941d5d3349949fdc360beb259bdba49e513e1e0dda0fc8bbb764736f6c63430008230033",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}
